@@ -71,12 +71,12 @@ void deallocate(struct manager *manager, union handle handle) {
 	manager->freelist = index;
 }
 
-int is_valid(struct manager *manager, union handle handle) {
+int is_valid(const struct manager *manager, union handle handle) {
 	unsigned index = handle.fields.index;
 	return index < manager->num_items && handle.fields.generation == manager->metadata[index].generation;
 }
 
-void *get_item_from_handle(struct manager *manager, union handle handle) {
+void *get_item_from_handle(const struct manager *manager, union handle handle) {
 	unsigned index = handle.fields.index;
 	if (index >= manager->num_items || handle.fields.generation != manager->metadata[index].generation)
 		index = 0; // Handle is invalid.
