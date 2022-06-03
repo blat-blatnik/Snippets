@@ -20,13 +20,13 @@ void *allocate(struct allocator *allocator, int size, int alignment) {
 }
 
 void deallocate(struct allocator *allocator, void *block, int size) {
-	if (block && (char *)block + size == (char *)allocator->buffer + allocator->cursor)
+	if ((char *)block + size == (char *)allocator->buffer + allocator->cursor)
 		allocator->cursor -= size;
 }
 
 void *reallocate(struct allocator *allocator, void *block, int old_size, int new_size, int alignment) {
 	uintptr_t mask = (uintptr_t)alignment - 1;
-	if (block && (char *)block + old_size == (char *)allocator->buffer + allocator->cursor && ((uintptr_t)block & mask) == 0) {
+	if ((char *)block + old_size == (char *)allocator->buffer + allocator->cursor && ((uintptr_t)block & mask) == 0) {
 		int new_cursor = allocator->cursor + new_size - old_size;
 		if (new_cursor > allocator->capacity)
 			return 0;
