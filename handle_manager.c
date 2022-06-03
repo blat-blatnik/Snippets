@@ -1,8 +1,8 @@
 struct manager {
-	void *items;
+	void *items; // items[0] is a reserved sentinel.
 	struct metadata *metadata;
 	unsigned short freelist;
-	unsigned short num_items; // Item [0] is a reserved sentinel item.
+	unsigned short num_items;
 	unsigned short item_size;
 };
 
@@ -117,8 +117,30 @@ int main(void) {
 	}
 
 	for (int i = 1; i < 10; ++i)
-		allocate(&manager);
+		handles[i] = allocate(&manager);
 	assert(*(int *)get_item_from_handle(&manager, allocate(&manager)) == items[0]);
 	assert(*(int *)get_item_from_handle(&manager, allocate(&manager)) == items[0]);
 	assert(*(int *)get_item_from_handle(&manager, allocate(&manager)) == items[0]);
+	for (int i = 1; i < 10; ++i)
+		deallocate(&manager, handles[i]);
+
+	for (int i = 1; i < 5; ++i)
+		handles[i] = allocate(&manager);
+
+	for (unsigned index = metadata[0].next, i = 1; index; index = metadata[index].next, ++i) {
+		assert(i < 5);
+		assert(items[index] == i);
+	}
+
+	for (int i = 5; i < 10; ++i)
+		handles[i] = allocate(&manager);
+	for (unsigned index = metadata[0].next, i = 1; index; index = metadata[index].next, ++i) {
+		assert(i < 10);
+		assert(items[index] == i);
+	}
+	for (int i = 1; i < 10; ++i)
+		deallocate(&manager, handles[i]);
+
+	for (unsigned index = metadata[0].next; index; index = metadata[index].next)
+		assert(0);
 }
