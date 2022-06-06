@@ -1,5 +1,5 @@
 #include <stdint.h> // uintptr_t
-#include <string.h> // memcpy
+#include <string.h> // memcpy - only needed for realloc
 
 struct allocator {
 	void *buffer;
@@ -50,7 +50,7 @@ int main(void) {
 	deallocate(&allocator, 0, 0);
 	assert(!reallocate(&allocator, 0, 0, 1, 1));
 
-	char buffer[16];
+	_Alignas(16) char buffer[16];
 	allocator = (struct allocator){ .buffer = buffer, .capacity = sizeof buffer };
 	char *c = allocate(&allocator, sizeof(char), _Alignof(char));
 	short *s = allocate(&allocator, sizeof(short), _Alignof(short));
