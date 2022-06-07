@@ -237,4 +237,14 @@ int main(void) {
 
 		destroy(&table);
 	}
+
+	{
+		// This shouldn't leak.
+		for (int i = 0; i < 10000; ++i) {
+			struct table table = { 0 };
+			for (int j = 0; j < 10000; ++j)
+				add(&table, (unsigned)j, (unsigned)j);
+			destroy(&table);
+		}
+	}
 }

@@ -52,21 +52,33 @@ static void private__reserve(list(void) *plist, int min_capacity, int item_size)
 
 #include <assert.h>
 int main(void) {
-	list(long long) * ints = NULL;
-	assert(count(ints) == 0);
-	assert(capacity(ints) == 0);
+	{
+		list(int) *ints = NULL;
+		assert(count(ints) == 0);
+		assert(capacity(ints) == 0);
 
-	for (int i = 0; i < 1024; ++i)
-		add(&ints, i);
-	assert(count(ints) == 1024);
+		for (int i = 0; i < 1024; ++i)
+			add(&ints, i);
+		assert(count(ints) == 1024);
 
-	for (int i = 0; i < 1024; ++i)
-		assert(ints[i] == i);
+		for (int i = 0; i < 1024; ++i)
+			assert(ints[i] == i);
 
-	for (int i = 1023; i >= 0; --i)
-		assert(pop(&ints) == i);
-	assert(count(ints) == 0);
+		for (int i = 1023; i >= 0; --i)
+			assert(pop(&ints) == i);
+		assert(count(ints) == 0);
 
-	destroy(&ints);
-	assert(!ints);
+		destroy(&ints);
+		assert(!ints);
+	}
+	
+	{
+		// This shouldn't leak.
+		for (int i = 0; i < 100000; ++i) {
+			list(int) *ints = NULL;
+			for (int j = 0; j < 10000; ++j)
+				add(&ints, j);
+			destroy(&ints);
+		}
+	}
 }

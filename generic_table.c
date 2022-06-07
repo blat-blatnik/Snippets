@@ -473,4 +473,14 @@ int main(void) {
 
 		destroy(&table);
 	}
+
+	{
+		// This shouldn't leak
+		for (int i = 0; i < 10000; ++i) {
+			table(struct int_int) table = NULL;
+			for (int j = 0; j < 10000; ++j)
+				add(&table, j, j);
+			destroy(&table);
+		}
+	}
 }

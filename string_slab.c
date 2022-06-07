@@ -58,4 +58,12 @@ int main(void) {
 	assert(slab->prev);
 	deallocate_all(&slab);
 	assert(!slab->prev);
+
+	// This shouldn't leak.
+	for (int i = 0; i < 10000; ++i) {
+		slab = &(struct slab) { 0 };
+		for (int j = 0; j < 10000; ++j)
+			copy_string(&slab, "ABCDEFGHIJKLMOP");
+		deallocate_all(&slab);
+	}
 }

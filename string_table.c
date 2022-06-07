@@ -308,4 +308,21 @@ int main(void) {
 
 		destroy(&table);
 	}
+
+	{
+		// This shouldn't leak.
+		for (int i = 0; i < 10000; ++i) {
+			struct table table = { 0 };
+			for (int j = 0; j < 1000; ++j) {
+				char keyval[5] = { 0 };
+				int x = j;
+				keyval[3] = x % 10; x /= 10;
+				keyval[2] = x % 10; x /= 10;
+				keyval[1] = x % 10; x /= 10;
+				keyval[0] = x % 10; x /= 10;
+				add(&table, keyval, keyval);
+			}
+			destroy(&table);
+		}
+	}
 }
