@@ -3,11 +3,10 @@
 // For simplicity and efficiency, this table doesn't actually store the keys. 
 // It only stores the key hashes. You'd better have a good hash function, because 
 // if two keys happen to hash to the same value you're in big trouble. They will 
-// overwrite each other. In practice, if you do have a decent hash function, 
-// then the likelyhood of this happening is really small with 64-bits hashes.
-// The hash 0 is reserved as a free value.
-// The hash 0xFFFFFFFFFFFFFFFF (all bits set) is reserved as a tombstone value.
-// Additionally, the highest bit of the hash
+// overwrite each other. In practice, if you have a decent hash function the 
+// likelyhood of this happening is really small with 64-bits hashes.
+// - The hash 0 is reserved as a free value.
+// - The hash 0xFFFFFFFFFFFFFFFF (all bits set) is reserved as a tombstone value.
 struct table {
 	unsigned long long *hashes;
 	unsigned long long *values;
@@ -24,8 +23,6 @@ void resize(struct table *table, int capacity) {
 	int pow2; // Round up capacity to a power of 2.
 	for (pow2 = 1; (1 << pow2) < capacity; ++pow2);
 	capacity = (1 << pow2);
-	if (capacity < 128)
-		capacity = 128;
 
 	unsigned long long *new_memory = malloc((size_t)capacity * 2 * sizeof new_memory[0]);
 	unsigned long long *new_hashes = new_memory;
@@ -54,14 +51,11 @@ void resize(struct table *table, int capacity) {
 }
 
 void reserve(struct table *table, int min_capacity) {
-	if (table->capacity < min_capacity) {
-		int capacity = 2 * table->capacity;
-		if (capacity < 128)
-			capacity = 128;
-		while (capacity < min_capacity)
-			capacity *= 2;
-		resize(table, capacity);
-	}
+	int capacity_for_load_factor = (3 * min_capacity) >> 1;
+	if (capacity_for_load_factor < 64)
+		capacity_for_load_factor = 64;
+	if (table->capacity < capacity_for_load_factor)
+		resize(table, capacity_for_load_factor);
 }
 
 void add(struct table *table, unsigned long long hash, unsigned long long value) {
@@ -140,6 +134,7 @@ int main(void) {
 		struct table table = { 0 };
 		assert(!get(table, 123));
 		assert(first_index(table) == -1);
+		destroy(&table);
 	}
 
 	{
@@ -199,9 +194,43 @@ int main(void) {
 			remaining[i] = 1;
 		for (int i = first_index(table); i >= 0; i = next_index(table, i)) {
 			int value = (int)table.values[i];
-			remaining[value] = 0;
+			remaining[value] -= 1;
 		}
 		int num_remaining = 0;
+		for (int i = 0; i < n; ++i)
+			num_remaining += remaining[i];
+		assert(num_remaining == 0);
+
+		for (int i = 0; i < n / 2; ++i)
+			remove(&table, hashes[i]);
+		assert(table.count == n / 2);
+		for (int i = n / 2; i < n; ++i)
+			assert(*get(table, hashes[i]) == (unsigned)i);
+
+		for (int i = 0; i < n; ++i)
+			remaining[i] = 1;
+		for (int i = first_index(table); i >= 0; i = next_index(table, i)) {
+			int value = (int)table.values[i];
+			remaining[value] -= 1;
+		}
+		int num_remaining1 = 0;
+		int num_remaining2 = 0;
+		for (int i = 0; i < n / 2; ++i)
+			num_remaining1 += remaining[i];
+		for (int i = n / 2; i < n; ++i)
+			num_remaining2 += remaining[i];
+		assert(num_remaining1 == n / 2);
+		assert(num_remaining2 == 0);
+
+		for (int i = 0; i < n / 2; ++i)
+			add(&table, hashes[i], (unsigned)i);
+		for (int i = 0; i < n; ++i)
+			remaining[i] = 1;
+		for (int i = first_index(table); i >= 0; i = next_index(table, i)) {
+			int value = (int)table.values[i];
+			remaining[value] -= 1;
+		}
+		num_remaining = 0;
 		for (int i = 0; i < n; ++i)
 			num_remaining += remaining[i];
 		assert(num_remaining == 0);
