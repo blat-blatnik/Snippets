@@ -5,16 +5,15 @@
 // if two keys happen to hash to the same value you're in big trouble. They will 
 // overwrite each other. In practice, if you have a decent hash function the 
 // likelyhood of this happening is really small with 64-bits hashes.
-// - The hash 0 is reserved as a free value.
-// - The hash 0xFFFFFFFFFFFFFFFF (all bits set) is reserved as a tombstone value.
 struct table {
 	unsigned long long *hashes;
 	unsigned long long *values;
 	int capacity; // Always a power of 2 or 0.
 	int count;
+	int num_tombstones;
 };
 
-#define TOMBSTONE ((unsigned long long)-1)
+#define TOMBSTONE 1
 
 void resize(struct table *table, int capacity) {
 	if (capacity <= table->count)
@@ -33,7 +32,7 @@ void resize(struct table *table, int capacity) {
 	unsigned mask = (unsigned)capacity - 1;
 	for (int i = 0; i < table->capacity; ++i) {
 		unsigned long long hash = table->hashes[i];
-		if (hash && hash != TOMBSTONE) {
+		if (hash > TOMBSTONE) {
 			for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
 				if (!new_hashes[j]) {
 					new_hashes[j] = hash;
@@ -48,67 +47,84 @@ void resize(struct table *table, int capacity) {
 	table->hashes = new_hashes;
 	table->values = new_values;
 	table->capacity = capacity;
+	table->num_tombstones = 0;
 }
 
 void reserve(struct table *table, int min_capacity) {
-	int capacity_for_load_factor = (3 * min_capacity) >> 1;
-	if (capacity_for_load_factor < 64)
-		capacity_for_load_factor = 64;
-	if (table->capacity < capacity_for_load_factor)
-		resize(table, capacity_for_load_factor);
+	if (3 * table->capacity < 4 * min_capacity) {
+		int capacity = 4 * min_capacity / 3;
+		if (capacity < 64)
+			capacity = 64;
+		resize(table, capacity);
+	}
 }
 
 void add(struct table *table, unsigned long long hash, unsigned long long value) {
-	// assert(hash != 0 && hash != TOMBSTONE);
-	// assert(!get(table, hash));
+	hash += (hash <= TOMBSTONE) ? 2 : 0;
 	reserve(table, table->count + 1);
 	unsigned mask = (unsigned)table->capacity - 1;
-	unsigned i = (unsigned)hash & mask;
-	while (table->hashes[i] && table->hashes[i] != TOMBSTONE)
-		i = (i + 1) & mask;
-	table->hashes[i] = hash;
-	table->values[i] = value;
-	++table->count;
+	unsigned index = (unsigned)-1;
+	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
+		if (table->hashes[i] == hash) {
+			table->values[i] = value;
+			return;
+		}
+		if (!table->hashes[i]) {
+			index = min(index, i);
+			break;
+		}
+		if (table->hashes[i] == TOMBSTONE)
+			index = min(index, i);
+	}
+
+	if (table->hashes[index] == TOMBSTONE)
+		table->num_tombstones--;
+	table->hashes[index] = hash;
+	table->values[index] = value;
+	table->count++;
 }
 
 void remove(struct table *table, unsigned long long hash) {
-	// assert(hash != 0 && hash != TOMBSTONE);
 	if (!table->count)
-		return; // Tried to remove from an empty table.
+		return;
+
+	hash += (hash <= TOMBSTONE) ? 2 : 0;
 	unsigned mask = (unsigned)table->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; table->hashes[i]; i = (i + 1) & mask) {
 		if (table->hashes[i] == hash) {
 			table->hashes[i] = TOMBSTONE;
 			table->count--;
+			table->num_tombstones++;
+			if (8 * table->num_tombstones > table->capacity)
+				resize(table, table->capacity); // Get rid of tombstones.
 			return;
 		}
 	}
-	// Tried to remove non-existent key.
 }
 
 unsigned long long *get(struct table table, unsigned long long hash) {
-	// assert(hash != 0 && hash != TOMBSTONE);
-	if (!table.capacity)
+	if (!table.count)
 		return NULL;
+
+	hash += (hash <= TOMBSTONE) ? 2 : 0;
 	unsigned mask = (unsigned)table.capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; table.hashes[i]; i = (i + 1) & mask)
 		if (table.hashes[i] == hash)
 			return &table.values[i];
+
 	return NULL;
 }
 
 int first_index(struct table table) {
-	if (!table.count)
-		return -1;
 	for (int i = 0; i < table.capacity; ++i)
-		if (table.hashes[i] && table.hashes[i] != TOMBSTONE)
+		if (table.hashes[i] > TOMBSTONE)
 			return i;
-	return -1; // This should never happen.
+	return -1;
 }
 
 int next_index(struct table table, int index) {
 	for (int i = index + 1; i < table.capacity; ++i)
-		if (table.hashes[i] && table.hashes[i] != TOMBSTONE)
+		if (table.hashes[i] > TOMBSTONE)
 			return i;
 	return -1;
 }
@@ -236,6 +252,19 @@ int main(void) {
 		assert(num_remaining == 0);
 
 		destroy(&table);
+	}
+
+	{
+		// Potential pathological case: create a bunch of items and then delete them 
+		// to leave tombstones, then lookup each item. If we don't clean tombstones this is O(n^2).
+		struct table table = { 0 };
+		for (unsigned i = 2; i <= 1048577; ++i)
+			add(&table, i, i);
+		for (unsigned i = 2; i <= 1048577; ++i)
+			remove(&table, i, i);
+		assert(table.count == 0);
+		for (unsigned i = 2; i <= 1048577; ++i)
+			assert(!get(table, i));
 	}
 
 	{

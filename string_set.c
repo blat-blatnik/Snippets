@@ -6,6 +6,7 @@ struct set {
 	struct slab *slab;
 	int count;
 	int capacity;
+	int num_tombstones;
 };
 
 struct slab {
@@ -15,7 +16,7 @@ struct slab {
 	// Memory comes right after this.
 };
 
-#define TOMBSTONE ((void*)(size_t)-1)
+#define TOMBSTONE 1
 
 unsigned long long hash_string(const char *string) {
 	unsigned long long hash = 14695981039346656037u;
@@ -68,7 +69,7 @@ void resize(struct set *set, int capacity) {
 
 	unsigned mask = capacity - 1;
 	for (int i = 0; i < set->capacity; ++i) {
-		if (set->items[i] && set->items[i] != TOMBSTONE) {
+		if ((size_t)set->items[i] > TOMBSTONE) {
 			char *item = copy_string(&new_slab, set->items[i]);
 			unsigned long long hash = hash_string(item);
 			for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
@@ -89,6 +90,7 @@ void resize(struct set *set, int capacity) {
 	set->items = new_items;
 	set->slab = new_slab;
 	set->capacity = capacity;
+	set->num_tombstones = 0;
 }
 
 void reserve(struct set *set, int min_capacity) {
@@ -106,53 +108,63 @@ void add(struct set *set, const char *item) {
 	reserve(set, set->count + 1);
 	unsigned long long hash = hash_string(item);
 	unsigned mask = (unsigned)set->capacity - 1;
+	unsigned index = (unsigned)-1;
 	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
-		if (!set->items[i] || set->items[i] == TOMBSTONE) {
-			set->count++;
-			set->items[i] = copy_string(&set->slab, item);
-			return;
+		if (!set->items[i]) {
+			index = min(index, i);
+			break;
 		}
-		if (strcmp(set->items[i], item) == 0)
+		if (set->items[i] == (void *)TOMBSTONE)
+			index = min(index, i);
+		else if (strcmp(set->items[i], item) == 0)
 			return;
 	}
+	if (set->items[index] == (void *)TOMBSTONE)
+		--set->num_tombstones;
+	set->count++;
+	set->items[index] = copy_string(&set->slab, item);
 }
 
 void remove(struct set *set, const char *item) {
-	if (set->count == 0)
+	if (!set->count)
 		return;
 	
 	unsigned long long hash = hash_string(item);
 	unsigned mask = (unsigned)set->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; set->items[i]; i = (i + 1) & mask) {
-		if (set->items[i] != TOMBSTONE && strcmp(set->items[i], item) == 0) {
-			set->items[i] = TOMBSTONE;
+		if (set->items[i] != (void *)TOMBSTONE && strcmp(set->items[i], item) == 0) {
+			set->items[i] = (void *)TOMBSTONE;
 			set->count--;
+			set->num_tombstones++;
+			if (8 * set->num_tombstones > set->capacity)
+				resize(set, set->capacity); // Get rid of tombstones.
+			return;
 		}
 	}
 }
 
 int contains(struct set set, const char *item) {
-	if (set.count == 0)
+	if (!set.count)
 		return 0;
 
 	unsigned long long hash = hash_string(item);
 	unsigned mask = (unsigned)set.capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; set.items[i]; i = (i + 1) & mask)
-		if (set.items[i] != TOMBSTONE && strcmp(set.items[i], item) == 0)
+		if (set.items[i] != (void *)TOMBSTONE && strcmp(set.items[i], item) == 0)
 			return 1;
 	return 0;
 }
 
 int first_index(struct set set) {
 	for (int i = 0; i < set.capacity; ++i)
-		if (set.items[i] && set.items[i] != TOMBSTONE)
+		if ((size_t)set.items[i] > TOMBSTONE)
 			return i;
 	return -1;
 }
 
 int next_index(struct set set, int index) {
 	for (int i = index + 1; i < set.capacity; ++i)
-		if (set.items[i] && set.items[i] != TOMBSTONE)
+		if ((size_t)set.items[i] > TOMBSTONE)
 			return i;
 	return -1;
 }
@@ -169,6 +181,16 @@ void destroy(struct set *set) {
 
 #include <assert.h>
 int main(void) {
+	static char items[1048576][8] = { 0 };
+	int n = sizeof items / sizeof items[0];
+	for (int i = 0; i < n; ++i) {
+		int x = i;
+		for (int j = 0; j < 7; ++j) {
+			items[i][6 - j] = '0' + x % 10;
+			x /= 10;
+		}
+	}
+
 	{
 		struct set set = { 0 };
 		assert(!contains(set, "Hi"));
@@ -214,16 +236,6 @@ int main(void) {
 	}
 
 	{
-		static char items[1048576][8] = { 0 };
-		int n = sizeof items / sizeof items[0];
-		for (int i = 0; i < n; ++i) {
-			int x = i;
-			for (int j = 0; j < 7; ++j) {
-				items[i][6 - j] = '0' + x % 10;
-				x /= 10;
-			}
-		}
-
 		struct set set = { 0 };
 		for (int i = 0; i < n; ++i)
 			assert(!contains(set, items[i]));
@@ -273,6 +285,21 @@ int main(void) {
 		for (int i = 0; i < n; ++i)
 			assert(total[i] == 1);
 
+		destroy(&set);
+	}
+
+	{
+		// Potential pathological case: create a bunch of items and then delete them 
+		// to leave tombstones, then lookup each item. If we don't clean tombstones this is O(n^2).
+		struct set set = { 0 };
+		for (int i = 0; i < n - 1; ++i)
+			add(&set, items[i]);
+		resize(&set, set.count + 1);
+		for (int i = 1; i < n - 1; ++i)
+			remove(&set, items[i]);
+		assert(set.count == 1);
+		for (int i = 1; i < n - 1; ++i)
+			assert(!contains(set, items[i]));
 		destroy(&set);
 	}
 

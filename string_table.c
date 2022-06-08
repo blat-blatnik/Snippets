@@ -7,6 +7,7 @@ struct table {
 	struct slab *slab;
 	int count;
 	int capacity;
+	int num_tombstones;
 };
 
 struct slab {
@@ -16,7 +17,7 @@ struct slab {
 	// Memory comes right after this.
 };
 
-#define TOMBSTONE ((void*)(size_t)-1)
+#define TOMBSTONE 1
 
 unsigned long long hash_string(const char *string) {
 	unsigned long long hash = 14695981039346656037u;
@@ -70,7 +71,7 @@ void resize(struct table *table, int capacity) {
 
 	unsigned mask = capacity - 1;
 	for (int i = 0; i < table->capacity; ++i) {
-		if (table->keys[i] && table->keys[i] != TOMBSTONE) {
+		if ((size_t)table->keys[i] > TOMBSTONE) {
 			char *key = copy_string(&new_slab, table->keys[i]);
 			char *val = copy_string(&new_slab, table->vals[i]);
 			unsigned long long hash = hash_string(key);
@@ -94,6 +95,7 @@ void resize(struct table *table, int capacity) {
 	table->vals = new_vals;
 	table->slab = new_slab;
 	table->capacity = capacity;
+	table->num_tombstones = 0;
 }
 
 void reserve(struct table *table, int min_capacity) {
@@ -111,53 +113,64 @@ void add(struct table *table, const char *key, const char *val) {
 	reserve(table, table->count + 1);
 	unsigned long long hash = hash_string(key);
 	unsigned mask = (unsigned)table->capacity - 1;
+	unsigned index = (unsigned)-1;
 	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
-		// assert(table->metadata[i] != metadata || strcmp(table->keys[i], key) == 0); // Key already in table.
-		if (!table->keys[i] || table->keys[i] == TOMBSTONE) {
-			table->count++;
-			table->keys[i] = copy_string(&table->slab, key);
+		if (!table->keys[i]) {
+			index = min(index, i);
+			break;
+		}
+		if (table->keys[i] == (void *)TOMBSTONE)
+			index = min(index, i);
+		else if (strcmp(table->keys[i], key) == 0) {
 			table->vals[i] = copy_string(&table->slab, val);
 			return;
 		}
 	}
+	table->count++;
+	table->keys[index] = copy_string(&table->slab, key);
+	table->vals[index] = copy_string(&table->slab, val);
 }
 
 void remove(struct table *table, const char *key) {
-	if (table->count == 0)
-		return; // Tried to remove from empty table.
+	if (!table->count)
+		return;
 
 	unsigned long long hash = hash_string(key);
 	unsigned mask = (unsigned)table->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; table->keys[i]; i = (i + 1) & mask) {
-		if (table->keys[i] != TOMBSTONE && strcmp(table->keys[i], key) == 0) {
-			table->keys[i] = TOMBSTONE;
+		if (table->keys[i] != (void *)TOMBSTONE && strcmp(table->keys[i], key) == 0) {
+			table->keys[i] = (void *)TOMBSTONE;
 			table->count--;
+			table->num_tombstones++;
+			if (8 * table->num_tombstones > table->capacity)
+				resize(table, table->capacity); // Get rid of tombstones.
 		}
 	}
-	// Tried to remove non-existent key.
 }
 
 const char *get(struct table table, const char *key) {
-	if (table.count == 0)
+	if (!table.count)
 		return NULL;
+
 	unsigned long long hash = hash_string(key);
 	unsigned mask = (unsigned)table.capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; table.keys[i]; i = (i + 1) & mask)
-		if (table.keys[i] != TOMBSTONE && strcmp(table.keys[i], key) == 0)
+		if (table.keys[i] != (void *)TOMBSTONE && strcmp(table.keys[i], key) == 0)
 			return table.vals[i];
+
 	return NULL;
 }
 
 int first_index(struct table table) {
 	for (int i = 0; i < table.capacity; ++i)
-		if (table.keys[i] && table.keys[i] != TOMBSTONE)
+		if ((size_t)table.keys[i] > TOMBSTONE)
 			return i;
 	return -1;
 }
 
 int next_index(struct table table, int index) {
 	for (int i = index + 1; i < table.capacity; ++i)
-		if (table.keys[i] && table.keys[i] != TOMBSTONE)
+		if ((size_t)table.keys[i] > TOMBSTONE)
 			return i;
 	return -1;
 }
@@ -174,6 +187,22 @@ void destroy(struct table *table) {
 
 #include <assert.h>
 int main(void) {
+	static char keys[1048576][9];
+	static char vals[1048576][9];
+	int n = sizeof keys / sizeof keys[0];
+	for (int i = 0; i < n; ++i) {
+		keys[i][0] = 'k';
+		vals[i][0] = 'v';
+		int x = i;
+		for (int j = 0; j < 7; ++j) {
+			keys[i][7 - j] = '0' + x % 10;
+			vals[i][7 - j] = '0' + x % 10;
+			x /= 10;
+		}
+		keys[i][8] = 0;
+		vals[i][8] = 0;
+	}
+
 	{
 		struct table table = { 0 };
 		assert(!get(table, ""));
@@ -204,22 +233,6 @@ int main(void) {
 	}
 
 	{
-		static char keys[1048576][9];
-		static char vals[1048576][9];
-		int n = sizeof keys / sizeof keys[0];
-		for (int i = 0; i < n; ++i) {
-			keys[i][0] = 'k';
-			vals[i][0] = 'v';
-			int x = i;
-			for (int j = 0; j < 7; ++j) {
-				keys[i][7 - j] = '0' + x % 10;
-				vals[i][7 - j] = '0' + x % 10;
-				x /= 10;
-			}
-			keys[i][8] = 0;
-			vals[i][8] = 0;
-		}
-
 		struct table table = { 0 };
 		for (int i = 0; i < n; ++i)
 			add(&table, keys[i], vals[i]);
@@ -296,10 +309,25 @@ int main(void) {
 	}
 
 	{
+		// Potential pathological case: create a bunch of items and then delete them 
+		// to leave tombstones, then lookup each item. If we don't clean tombstones this is O(n^2).
+		struct table table = { 0 };
+		for (int i = 0; i < n - 1; ++i)
+			add(&table, keys[i], vals[i]);
+		//resize(&table, table.count + 1);
+		for (int i = 1; i < n - 1; ++i)
+			remove(&table, keys[i]);
+		assert(table.count == 1);
+		for (int i = 1; i < n - 1; ++i)
+			assert(!get(table, keys[i]));
+		destroy(&table);
+	}
+
+	{
 		// This shouldn't leak.
 		for (int i = 0; i < 10000; ++i) {
 			struct table table = { 0 };
-			for (int j = 0; j < 1000; ++j) {
+			for (int j = 0; j < 10000; ++j) {
 				char keyval[5] = { 0 };
 				int x = j;
 				keyval[3] = x % 10; x /= 10;
