@@ -4,7 +4,6 @@
 struct table {
 	char **keys;
 	char **vals;
-	unsigned char *metadata;
 	struct slab *slab;
 	int count;
 	int capacity;
@@ -17,7 +16,7 @@ struct slab {
 	// Memory comes right after this.
 };
 
-#define TOMBSTONE 0xFF
+#define TOMBSTONE ((void*)(size_t)-1)
 
 unsigned long long hash_string(const char *string) {
 	unsigned long long hash = 14695981039346656037u;
@@ -60,31 +59,25 @@ void resize(struct table *table, int capacity) {
 	while (first_slab_capacity < total_string_size)
 		first_slab_capacity *= 2;
 
-	int metadata_capacity = (capacity + 0xF) & (~0xF); // Align the slab (which comes after the metadata) to 16 bytes.
-	void *new_memory = malloc(capacity * (sizeof table->keys[0] + sizeof table->vals[0]) + metadata_capacity * sizeof table->metadata[0] + sizeof table->slab[0] + first_slab_capacity);
+	void *new_memory = malloc(capacity * (sizeof table->keys[0] + sizeof table->vals[0]) + sizeof table->slab[0] + first_slab_capacity);
 	char **new_keys = new_memory;
 	char **new_vals = new_keys + capacity;
-	unsigned char *new_metadata = (char *)(new_vals + capacity);
-	struct slab *new_slab = (struct slab *)(new_metadata + metadata_capacity);
+	memset(new_keys, 0, (size_t)capacity * sizeof new_keys[0]);
+	struct slab *new_slab = (struct slab *)(new_vals + capacity);
 	new_slab->prev = NULL;
 	new_slab->capacity = first_slab_capacity;
 	new_slab->cursor = 0;
-	memset(new_metadata, 0, (size_t)capacity);
 
 	unsigned mask = capacity - 1;
 	for (int i = 0; i < table->capacity; ++i) {
-		if (table->metadata[i] && table->metadata[i] != TOMBSTONE) {
+		if (table->keys[i] && table->keys[i] != TOMBSTONE) {
 			char *key = copy_string(&new_slab, table->keys[i]);
 			char *val = copy_string(&new_slab, table->vals[i]);
 			unsigned long long hash = hash_string(key);
 			for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
-				if (!new_metadata[j]) {
-					unsigned metadata = hash & 0xFF;
-					metadata += (metadata == 0);
-					metadata -= (metadata == TOMBSTONE);
+				if (!new_keys[j]) {
 					new_keys[j] = key;
 					new_vals[j] = val;
-					new_metadata[j] = metadata;
 					break;
 				}
 			}
@@ -100,30 +93,28 @@ void resize(struct table *table, int capacity) {
 	table->keys = new_keys;
 	table->vals = new_vals;
 	table->slab = new_slab;
-	table->metadata = new_metadata;
 	table->capacity = capacity;
 }
 
 void reserve(struct table *table, int min_capacity) {
-	int capacity_for_load_factor = (3 * min_capacity) >> 1;
-	if (capacity_for_load_factor < 64)
-		capacity_for_load_factor = 64;
-	if (table->capacity < capacity_for_load_factor)
-		resize(table, capacity_for_load_factor);
+	if (2 * table->capacity < 3 * min_capacity) {
+		int new_capacity = 2 * table->capacity;
+		if (new_capacity < 64)
+			new_capacity = 64;
+		while (2 * new_capacity < 3 * min_capacity)
+			new_capacity *= 2;
+		resize(table, new_capacity);
+	}
 }
 
 void add(struct table *table, const char *key, const char *val) {
 	reserve(table, table->count + 1);
 	unsigned long long hash = hash_string(key);
-	unsigned metadata = hash & 0xFF;
-	metadata += (metadata == 0);
-	metadata -= (metadata == TOMBSTONE);
-	unsigned mask = table->capacity - 1;
+	unsigned mask = (unsigned)table->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
 		// assert(table->metadata[i] != metadata || strcmp(table->keys[i], key) == 0); // Key already in table.
-		if (!table->metadata[i] || table->metadata[i] == TOMBSTONE) {
+		if (!table->keys[i] || table->keys[i] == TOMBSTONE) {
 			table->count++;
-			table->metadata[i] = metadata;
 			table->keys[i] = copy_string(&table->slab, key);
 			table->vals[i] = copy_string(&table->slab, val);
 			return;
@@ -134,14 +125,12 @@ void add(struct table *table, const char *key, const char *val) {
 void remove(struct table *table, const char *key) {
 	if (table->count == 0)
 		return; // Tried to remove from empty table.
+
 	unsigned long long hash = hash_string(key);
-	unsigned metadata = hash & 0xFF;
-	metadata += (metadata == 0);
-	metadata -= (metadata == TOMBSTONE);
-	unsigned mask = table->capacity - 1;
-	for (unsigned i = (unsigned)hash & mask; table->metadata[i]; i = (i + 1) & mask) {
-		if (table->metadata[i] == metadata && strcmp(table->keys[i], key) == 0) {
-			table->metadata[i] = TOMBSTONE;
+	unsigned mask = (unsigned)table->capacity - 1;
+	for (unsigned i = (unsigned)hash & mask; table->keys[i]; i = (i + 1) & mask) {
+		if (table->keys[i] != TOMBSTONE && strcmp(table->keys[i], key) == 0) {
+			table->keys[i] = TOMBSTONE;
 			table->count--;
 		}
 	}
@@ -152,26 +141,23 @@ const char *get(struct table table, const char *key) {
 	if (table.count == 0)
 		return NULL;
 	unsigned long long hash = hash_string(key);
-	unsigned metadata = hash & 0xFF;
-	metadata += (metadata == 0);
-	metadata -= (metadata == TOMBSTONE);
-	unsigned mask = table.capacity - 1;
-	for (unsigned i = (unsigned)hash & mask; table.metadata[i]; i = (i + 1) & mask)
-		if (table.metadata[i] == metadata && strcmp(table.keys[i], key) == 0)
+	unsigned mask = (unsigned)table.capacity - 1;
+	for (unsigned i = (unsigned)hash & mask; table.keys[i]; i = (i + 1) & mask)
+		if (table.keys[i] != TOMBSTONE && strcmp(table.keys[i], key) == 0)
 			return table.vals[i];
 	return NULL;
 }
 
 int first_index(struct table table) {
 	for (int i = 0; i < table.capacity; ++i)
-		if (table.metadata[i] && table.metadata[i] != TOMBSTONE)
+		if (table.keys[i] && table.keys[i] != TOMBSTONE)
 			return i;
 	return -1;
 }
 
 int next_index(struct table table, int index) {
 	for (int i = index + 1; i < table.capacity; ++i)
-		if (table.metadata[i] && table.metadata[i] != TOMBSTONE)
+		if (table.keys[i] && table.keys[i] != TOMBSTONE)
 			return i;
 	return -1;
 }
@@ -214,7 +200,7 @@ int main(void) {
 		assert(remaining[0] == 0 && remaining[1] == 0 && remaining[2] == 0 && remaining[3] == 0);
 
 		destroy(&table);
-		assert(!table.capacity && !table.count && !table.keys && !table.vals && !table.metadata && !table.slab);
+		assert(!table.capacity && !table.count && !table.keys && !table.vals && !table.slab);
 	}
 
 	{
