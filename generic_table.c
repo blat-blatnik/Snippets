@@ -277,7 +277,7 @@ void private__remove(table(void) *ptable, const void *key, int keyval_size, int 
 			if (4 * header->count < header->capacity)
 				private__resize(ptable, 2 * header->count, keyval_size, key_size);
 			else if (8 * header->num_tombstones > header->capacity)
-				private__resize(ptable, capacity(*ptable), keyval_size, key_size); // Get rid of tombstones.
+				private__resize(ptable, header->capacity, keyval_size, key_size); // Get rid of tombstones.
 			return;
 		}
 	}
@@ -512,6 +512,7 @@ int main(void) {
 		assert(contains(table, 0));
 		for (int i = 1; i < 1048575; ++i)
 			assert(!contains(table, i));
+		destroy(&table);
 	}
 
 	{
