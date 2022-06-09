@@ -20,9 +20,10 @@ struct header { // [header][keyvals][metadata]
 	unsigned char *metadata;
 	int count;
 	int capacity;
+	int num_tombstones;
 };
 
-#define TOMBSTONE 0xFF
+#define TOMBSTONE 1
 
 #define table(KV) KV*
 
@@ -51,6 +52,7 @@ struct header { // [header][keyvals][metadata]
 	(get((table),(key))>=0)
 
 #define remove(ptable, existing_key)do{\
+	if (!count(*(ptable))) break;\
 	(*(ptable))[capacity(*(ptable))].key = (existing_key);\
 	private__remove((void **)(ptable), *(ptable) + capacity(*(ptable)), sizeof*(*(ptable)), sizeof(*(ptable))->key);\
 }while(0)
@@ -109,20 +111,22 @@ void destroy(table(void) *ptable) {
 }
 
 int first_index(const table(void) table) {
-	int cap = capacity(table);
-	struct header *header = (struct header *)table - 1;
-	for (int i = 0; i < cap; ++i)
-		if (header->metadata[i] && header->metadata[i] != TOMBSTONE)
-			return i;
+	if (table) {
+		struct header *header = (struct header *)table - 1;
+		for (int i = 0; i < header->capacity; ++i)
+			if (header->metadata[i] > TOMBSTONE)
+				return i;
+	}
 	return -1;
 }
 
 int next_index(const table(void) table, int index) {
-	int cap = capacity(table);
-	struct header *header = (struct header *)table - 1;
-	for (int i = index + 1; i < cap; ++i)
-		if (header->metadata[i] && header->metadata[i] != TOMBSTONE)
-			return i;
+	if (table) {
+		struct header *header = (struct header *)table - 1;
+		for (int i = index + 1; i < header->capacity; ++i)
+			if (header->metadata[i] > TOMBSTONE)
+				return i;
+	}
 	return -1;
 }
 
@@ -149,9 +153,8 @@ unsigned long long default_hash(void *context, const void *key, int key_size) {
 void private__reserve(table(void) *ptable, int min_capacity, int keyval_size, int key_size) {
 	int cap = capacity(*ptable);
 	if (4 * min_capacity > 3 * cap) {
-		int capacity_for_load_factor = (4 * min_capacity) / 3;
 		int new_capacity = 64;
-		while (new_capacity < capacity_for_load_factor)
+		while (4 * min_capacity > 3 * new_capacity)
 			new_capacity *= 2;
 		int num_keyvals = new_capacity + 1; // We need 1 keyval for scratch space.
 
@@ -175,6 +178,7 @@ void private__reserve(table(void) *ptable, int min_capacity, int keyval_size, in
 		new_header->slab = NULL;
 		new_header->metadata = new_metadata;
 		new_header->capacity = new_capacity;
+		new_header->num_tombstones = 0;
 
 		struct header *old_header = NULL;
 		unsigned char *old_metadata = NULL;
@@ -186,14 +190,11 @@ void private__reserve(table(void) *ptable, int min_capacity, int keyval_size, in
 
 		unsigned mask = (unsigned)new_capacity - 1;
 		for (int i = 0; i < cap; ++i) {
-			if (old_metadata[i] && old_metadata[i] != TOMBSTONE) {
+			if (old_metadata[i] > TOMBSTONE) {
 				unsigned long long hash = new_header->hash(new_header->hash_context, old_keyvals + i * keyval_size, key_size);
-				unsigned char metadata = hash & 0xFF;
-				metadata += (metadata == 0);
-				metadata -= (metadata == TOMBSTONE);
 				for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
 					if (!new_metadata[j]) {
-						new_metadata[j] = metadata;
+						new_metadata[j] = old_metadata[i];
 						new_header->copy(new_header->copy_context, new_keyvals + j * keyval_size, old_keyvals + i * keyval_size, keyval_size, &new_header->slab);
 						break;
 					}
@@ -217,8 +218,7 @@ void private__add(table(void) *ptable, const void *keyval, int keyval_size, int 
 	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
 		if (!header->metadata[i] || header->metadata[i] == TOMBSTONE) {
 			unsigned char metadata = hash & 0xFF;
-			metadata += (metadata == 0);
-			metadata -= (metadata == TOMBSTONE);
+			metadata += (metadata <= TOMBSTONE) ? 2 : 0;
 			header->metadata[i] = metadata;
 			header->copy(header->copy_context, keyvals + i * keyval_size, keyval, keyval_size, &header->slab);
 			header->count++;
@@ -230,9 +230,8 @@ void private__add(table(void) *ptable, const void *keyval, int keyval_size, int 
 int private__get(const table(void) table, const void *key, int keyval_size, int key_size) {
 	struct header *header = (struct header *)table - 1;
 	unsigned long long hash = header->hash(header->hash_context, key, key_size);
-	unsigned metadata = hash & 0xFF;
-	metadata += (metadata == 0);
-	metadata -= (metadata == TOMBSTONE);
+	unsigned char metadata = hash & 0xFF;
+	metadata += (metadata <= TOMBSTONE) ? 2 : 0;
 	unsigned mask = (unsigned)header->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; header->metadata[i]; i = (i + 1) & mask)
 		if (header->metadata[i] == metadata && header->equal(header->equal_context, key, (char *)table + i * keyval_size, key_size))
@@ -241,15 +240,10 @@ int private__get(const table(void) table, const void *key, int keyval_size, int 
 }
 
 void private__remove(table(void) *ptable, const void *key, int keyval_size, int key_size) {
-	int cap = capacity(*ptable);
-	if (!cap)
-		return; // Tried to remove from an empty table.
-	
 	struct header *header = ((struct header *)*ptable) - 1;
 	unsigned long long hash = header->hash(header->hash_context, key, key_size);
 	unsigned char metadata = hash & 0xFF;
-	metadata += (metadata == 0);
-	metadata -= (metadata == TOMBSTONE);
+	metadata += (metadata <= TOMBSTONE) ? 2 : 0;
 	unsigned mask = (unsigned)header->capacity - 1;
 	for (unsigned i = (unsigned)hash & mask; header->metadata[i]; i = (i + 1) & mask) {
 		if (header->metadata[i] == metadata && header->equal(header->equal_context, key, ((char *)*ptable) + i * keyval_size, key_size)) {
@@ -258,7 +252,6 @@ void private__remove(table(void) *ptable, const void *key, int keyval_size, int 
 			return;
 		}
 	}
-	// Tried to remove non-existent element.
 }
 
 #include <assert.h>
@@ -295,6 +288,7 @@ int main(void) {
 		assert(!capacity(table));
 		assert(get(table, 0) == -1);
 		assert(!contains(table, 1));
+		assert(first_index(table) == -1);
 		destroy(&table);
 	}
 	
