@@ -100,11 +100,9 @@ void resize(struct table *table, int capacity) {
 
 void reserve(struct table *table, int min_capacity) {
 	if (2 * table->capacity < 3 * min_capacity) {
-		int new_capacity = 2 * table->capacity;
+		int new_capacity = 3 * min_capacity / 2;
 		if (new_capacity < 64)
 			new_capacity = 64;
-		while (2 * new_capacity < 3 * min_capacity)
-			new_capacity *= 2;
 		resize(table, new_capacity);
 	}
 }

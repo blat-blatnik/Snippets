@@ -27,6 +27,9 @@ struct header { // [header][keyvals][metadata]
 
 #define table(KV) KV*
 
+#define resize(ptable, capacity)\
+	private__resize((ptable),(capacity),sizeof*(*(ptable)),sizeof(*(ptable))->key)
+
 #define reserve(ptable, min_capacity)\
 	private__reserve((ptable),(min_capacity),sizeof*(*(ptable)),sizeof(*(ptable))->key)
 
@@ -150,63 +153,74 @@ unsigned long long default_hash(void *context, const void *key, int key_size) {
 	return hash;
 }
 
-void private__reserve(table(void) *ptable, int min_capacity, int keyval_size, int key_size) {
-	int cap = capacity(*ptable);
-	if (4 * min_capacity > 3 * cap) {
-		int new_capacity = 64;
-		while (4 * min_capacity > 3 * new_capacity)
-			new_capacity *= 2;
-		int num_keyvals = new_capacity + 1; // We need 1 keyval for scratch space.
+void private__resize(table(void) *ptable, int new_capacity, int keyval_size, int key_size) {
+	int old_count = count(*ptable);
+	int old_capacity = capacity(*ptable);
+	if (new_capacity <= old_count)
+		new_capacity = old_count + 1;
 
-		void *new_memory = malloc(sizeof(struct header) + num_keyvals * (keyval_size + sizeof(unsigned char)));
-		struct header *new_header = new_memory;
-		char *new_keyvals = (char *)(new_header + 1);
-		unsigned char *new_metadata = (unsigned char *)(new_keyvals + num_keyvals * keyval_size);
-		memset(new_metadata, 0, (size_t)num_keyvals);
+	int pow2;
+	for (pow2 = 0; (1 << pow2) < new_capacity; ++pow2);
+	new_capacity = 1 << pow2;
+	int num_keyvals = new_capacity + 1;
 
-		new_header->count = count(*ptable);
-		if (*ptable)
-			*new_header = ((struct header *)(*ptable))[-1];
-		else {
-			new_header->hash = default_hash;
-			new_header->copy = default_copy;
-			new_header->equal = default_compare;
-			new_header->hash_context = NULL;
-			new_header->copy_context = NULL;
-			new_header->equal_context = NULL;
-		}
-		new_header->slab = NULL;
-		new_header->metadata = new_metadata;
-		new_header->capacity = new_capacity;
-		new_header->num_tombstones = 0;
+	void *new_memory = malloc(sizeof(struct header) + num_keyvals * (keyval_size + sizeof(unsigned char)));
+	struct header *new_header = new_memory;
+	char *new_keyvals = (char *)(new_header + 1);
+	unsigned char *new_metadata = (unsigned char *)(new_keyvals + num_keyvals * keyval_size);
+	memset(new_metadata, 0, (size_t)num_keyvals);
 
-		struct header *old_header = NULL;
-		unsigned char *old_metadata = NULL;
-		char *old_keyvals = *ptable;
-		if (*ptable) {
-			old_header = ((struct header *)(*ptable)) - 1;
-			old_metadata = old_header->metadata;
-		}
+	new_header->count = old_count;
+	if (*ptable)
+		*new_header = ((struct header *)(*ptable))[-1];
+	else {
+		new_header->hash = default_hash;
+		new_header->copy = default_copy;
+		new_header->equal = default_compare;
+		new_header->hash_context = NULL;
+		new_header->copy_context = NULL;
+		new_header->equal_context = NULL;
+	}
+	new_header->slab = NULL;
+	new_header->metadata = new_metadata;
+	new_header->capacity = new_capacity;
+	new_header->num_tombstones = 0;
 
-		unsigned mask = (unsigned)new_capacity - 1;
-		for (int i = 0; i < cap; ++i) {
-			if (old_metadata[i] > TOMBSTONE) {
-				unsigned long long hash = new_header->hash(new_header->hash_context, old_keyvals + i * keyval_size, key_size);
-				for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
-					if (!new_metadata[j]) {
-						new_metadata[j] = old_metadata[i];
-						new_header->copy(new_header->copy_context, new_keyvals + j * keyval_size, old_keyvals + i * keyval_size, keyval_size, &new_header->slab);
-						break;
-					}
+	struct header *old_header = NULL;
+	unsigned char *old_metadata = NULL;
+	char *old_keyvals = *ptable;
+	if (*ptable) {
+		old_header = ((struct header *)(*ptable)) - 1;
+		old_metadata = old_header->metadata;
+	}
+
+	unsigned mask = (unsigned)new_capacity - 1;
+	for (int i = 0; i < old_capacity; ++i) {
+		if (old_metadata[i] > TOMBSTONE) {
+			unsigned long long hash = new_header->hash(new_header->hash_context, old_keyvals + i * keyval_size, key_size);
+			for (unsigned j = (unsigned)hash & mask;; j = (j + 1) & mask) {
+				if (!new_metadata[j]) {
+					new_metadata[j] = old_metadata[i];
+					new_header->copy(new_header->copy_context, new_keyvals + j * keyval_size, old_keyvals + i * keyval_size, keyval_size, &new_header->slab);
+					break;
 				}
 			}
 		}
+	}
 
-		if (old_header) {
-			freeall(&old_header->slab);
-			free(old_header);
-		}
-		*ptable = new_header + 1;
+	if (old_header) {
+		freeall(&old_header->slab);
+		free(old_header);
+	}
+	*ptable = new_header + 1;
+}
+
+void private__reserve(table(void) *ptable, int min_capacity, int keyval_size, int key_size) {
+	if (4 * min_capacity > 3 * capacity(*ptable)) {
+		int new_capacity = 4 * min_capacity / 3;
+		if (new_capacity < 64)
+			new_capacity = 64;
+		private__resize(ptable, new_capacity, keyval_size, key_size);
 	}
 }
 
@@ -214,17 +228,27 @@ void private__add(table(void) *ptable, const void *keyval, int keyval_size, int 
 	struct header *header = (struct header *)(*ptable) - 1;
 	char *keyvals = *ptable;
 	unsigned long long hash = header->hash(header->hash_context, keyval, key_size);
+	unsigned char metadata = hash & 0xFF;
+	metadata += (metadata <= TOMBSTONE) ? 2 : 0;
 	unsigned mask = (unsigned)header->capacity - 1;
+	unsigned index = (unsigned)-1;
 	for (unsigned i = (unsigned)hash & mask;; i = (i + 1) & mask) {
-		if (!header->metadata[i] || header->metadata[i] == TOMBSTONE) {
-			unsigned char metadata = hash & 0xFF;
-			metadata += (metadata <= TOMBSTONE) ? 2 : 0;
-			header->metadata[i] = metadata;
+		if (!header->metadata[i]) {
+			index = min(index, i);
+			break;
+		}
+		if (header->metadata[i] == TOMBSTONE)
+			index = min(index, i);
+		else if (header->metadata[i] == metadata && header->equal(header->equal_context, keyvals + i * keyval_size, keyval, key_size)) {
 			header->copy(header->copy_context, keyvals + i * keyval_size, keyval, keyval_size, &header->slab);
-			header->count++;
 			return;
 		}
 	}
+	if (header->metadata[index] == TOMBSTONE)
+		header->num_tombstones--;
+	header->metadata[index] = metadata;
+	header->copy(header->copy_context, keyvals + index * keyval_size, keyval, keyval_size, &header->slab);
+	header->count++;
 }
 
 int private__get(const table(void) table, const void *key, int keyval_size, int key_size) {
@@ -249,11 +273,17 @@ void private__remove(table(void) *ptable, const void *key, int keyval_size, int 
 		if (header->metadata[i] == metadata && header->equal(header->equal_context, key, ((char *)*ptable) + i * keyval_size, key_size)) {
 			header->metadata[i] = TOMBSTONE;
 			header->count--;
+			header->num_tombstones++;
+			if (4 * header->count < header->capacity)
+				private__resize(ptable, 2 * header->count, keyval_size, key_size);
+			else if (8 * header->num_tombstones > header->capacity)
+				private__resize(ptable, capacity(*ptable), keyval_size, key_size); // Get rid of tombstones.
 			return;
 		}
 	}
 }
 
+#undef NDEBUG
 #include <assert.h>
 uint64_t hash_string(void *context, const void *key, int key_size) {
 	(void)context; (void)key_size;
@@ -466,6 +496,22 @@ int main(void) {
 			assert(total[i] == 1);
 
 		destroy(&table);
+	}
+
+	{
+		// Potential pathological case: create a bunch of items and then delete them 
+		// to leave tombstones, then lookup each item. If we don't clean tombstones this is O(n^2).
+		table(struct int_int) table = NULL;
+		for (int i = 0; i < 1048575; ++i)
+			add(&table, i, i);
+		resize(&table, count(table) + 1);
+		assert(capacity(table) == count(table) + 1);
+		for (int i = 1; i < 1048575; ++i)
+			remove(&table, i);
+		assert(count(table) == 1);
+		assert(contains(table, 0));
+		for (int i = 1; i < 1048575; ++i)
+			assert(!contains(table, i));
 	}
 
 	{

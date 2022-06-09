@@ -94,12 +94,10 @@ void resize(struct set *set, int capacity) {
 }
 
 void reserve(struct set *set, int min_capacity) {
-	if (2 * set->capacity < 3 * min_capacity) {
-		int new_capacity = 2 * set->capacity;
+	if (3 * min_capacity > 2 * set->capacity) {
+		int new_capacity = 3 * min_capacity / 2;
 		if (new_capacity < 64)
 			new_capacity = 64;
-		while (2 * new_capacity < 3 * min_capacity)
-			new_capacity *= 2;
 		resize(set, new_capacity);
 	}
 }
