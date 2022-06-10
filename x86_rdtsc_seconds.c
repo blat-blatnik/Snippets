@@ -40,7 +40,7 @@
 		return __get_cpuid_max(0, 0) != 0;
 	}
 	unsigned long long rdtsc(void) {
-		unsigned int lo, hi;
+		unsigned lo, hi;
 		asm volatile("rdtsc" : "=a" (lo), "=d" (hi)); // RDTSC copies contents of 64-bit TSC into EDX:EAX
 		return lo | ((unsigned long long)hi << 32);
 	}
