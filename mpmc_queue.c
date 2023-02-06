@@ -211,7 +211,7 @@ DWORD __stdcall ReaderThread(void *parameter)
 		int item = Dequeue(queue);
 		int writerId = item / 1000000;
 		int data = item % 1000000;
-		assert(writerId <= 3); // Ensure no data corruption corruption.
+		assert(writerId < 3); // Ensure no data corruption corruption.
 		InterlockedIncrement(&counters[writerId][data]);
 		assert(lastWriterData[writerId] < data); // Ensure data is correctly sequenced FIFO.
 		lastWriterData[writerId] = data;

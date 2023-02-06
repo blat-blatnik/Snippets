@@ -173,7 +173,7 @@ void reader_thread(Queue<T, Log2Capacity> *queue) {
 		int item = queue->dequeue();
 		int writer_id = item / 1000000;
 		int data = item % 1000000;
-		assert(writer_id <= 3); // Ensure no data corruption corruption.
+		assert(writer_id < 3); // Ensure no data corruption corruption.
 		counters[writer_id][data].fetch_add(1);
 		assert(last_writer_data[writer_id] < data); // Ensure data is correctly sequenced FIFO.
 		last_writer_data[writer_id] = data;
