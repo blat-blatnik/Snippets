@@ -14,7 +14,7 @@
 #include <new>
 
 template<typename T, int Log2Capacity> struct Queue {
-	static constexpr const int Capacity = 1 << Log2Capacity;
+	static constexpr int Capacity = 1 << Log2Capacity;
 	alignas(std::hardware_destructive_interference_size) std::atomic<uint32_t> write_cursor = 0;
 	alignas(std::hardware_destructive_interference_size) std::atomic<uint32_t> read_cursor = 0;
 	alignas(std::hardware_destructive_interference_size) struct {
@@ -27,7 +27,7 @@ template<typename T, int Log2Capacity> struct Queue {
 	void enqueue(T item) {
 		uint32_t ticket = write_cursor.fetch_add(1, std::memory_order_relaxed); // Serialization with all writers.
 		uint32_t slot = ticket % Capacity;
-		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 0);
+		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 0); // Writes happen on even cycles.
 
 		uint8_t current_cycle;
 		while ((current_cycle = slots[slot].cycle.load(std::memory_order_relaxed)) != cycle) // Serialization with 1 reader.
@@ -37,16 +37,16 @@ template<typename T, int Log2Capacity> struct Queue {
 		slots[slot].cycle.store(cycle + 1, std::memory_order_release); // Serialization with 1 reader.
 		slots[slot].cycle.notify_all(); // Hash table crawl.
 	}
-	int dequeue() {
+	T dequeue() {
 		uint32_t ticket = read_cursor.fetch_add(1, std::memory_order_relaxed); // Serialization with all readers.
 		uint32_t slot = ticket % Capacity;
-		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 1);
+		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 1); // Reads happen on odd cycles.
 
 		uint8_t current_cycle;
 		while ((current_cycle = slots[slot].cycle.load(std::memory_order_acquire)) != cycle) // Serialization with 1 writer.
 			slots[slot].cycle.wait(current_cycle, std::memory_order_acquire);
 
-		int item = slots[slot].item;
+		T item = slots[slot].item;
 		slots[slot].cycle.store(cycle + 1, std::memory_order_relaxed); // Serialization with 1 writer.
 		slots[slot].cycle.notify_all(); // Hash table crawl.
 		return item;
@@ -128,10 +128,10 @@ template<typename T, int Log2Capacity> struct Queue {
 		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 1);
 		return slots[slot].cycle.load(std::memory_order_acquire) == cycle; // Serialization with 1 writer.
 	}
-	int commit_dequeue(uint32_t ticket) {
+	T commit_dequeue(uint32_t ticket) {
 		uint32_t slot = ticket % Capacity;
 		uint8_t cycle = (uint8_t)((ticket / Capacity) * 2 + 1);
-		int item = slots[slot].item;
+		T item = slots[slot].item;
 		slots[slot].cycle.store(cycle + 1, std::memory_order_relaxed); // Serialization with 1 writer.
 		slots[slot].cycle.notify_all(); // Hash table crawl.
 		return item;
