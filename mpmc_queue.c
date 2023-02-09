@@ -7,7 +7,7 @@
 // - Polling versions of calls are possible.
 // - Queue is initialized to all 0.
 // - No memory allocations or thread local storage.
-// - Basically the exact same algorithm as https://github.com/rigtorp/MPMCQueue, which is battle tested.
+// - Slightly modified version of https://github.com/rigtorp/MPMCQueue, which is battle tested.
 
 #include <Windows.h>
 #pragma comment(lib, "Synchronization.lib")
@@ -16,11 +16,12 @@
 
 struct Queue
 {
-	__declspec(align(64)) UINT32 WriteCursor;
-	__declspec(align(64)) UINT32 ReadCursor;
+	__declspec(align(64)) UINT32 WriteTicket;
+	__declspec(align(64)) UINT32 ReadTicket;
 	__declspec(align(64)) struct
 	{
-		UINT8 Cycle;
+		UINT8 WriteTurn;
+		UINT8 ReadTurn;
 		int Item; // You can put anything you want here.
 	} Slots[CAPACITY];
 };
@@ -29,172 +30,89 @@ struct Queue
 
 void Enqueue(volatile struct Queue *queue, int item)
 {
-	UINT32 ticket = InterlockedIncrementNoFence((volatile LONG *)&queue->WriteCursor) - 1; // Serialization with all writers
+	UINT32 ticket = InterlockedIncrementNoFence((volatile LONG *)&queue->WriteTicket) - 1; // Serialization with all writers
 	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 0); // Writes happen on even cycles.
+	UINT8 turn = (UINT8)(ticket / CAPACITY); // Write turns start at 0.
 
-	UINT8 currentCycle;
-	while ((currentCycle = queue->Slots[slot].Cycle) != cycle) // Serialization with 1 reader.
-		WaitOnAddress(&queue->Slots[slot].Cycle, &currentCycle, sizeof currentCycle, INFINITE);
+	UINT8 currentTurn;
+	while ((currentTurn = queue->Slots[slot].WriteTurn) != turn) // Acquire, Serialization with 1 reader.
+		WaitOnAddress(&queue->Slots[slot].WriteTurn, &currentTurn, sizeof currentTurn, INFINITE);
 
 	queue->Slots[slot].Item = item;
-	queue->Slots[slot].Cycle = cycle + 1; // Release, serialization with 1 reader.
-	WakeByAddressAll((void *)&queue->Slots[slot].Cycle); // Hash table crawl.
+	queue->Slots[slot].ReadTurn = turn + 1; // Release, serialization with 1 reader.
+	WakeByAddressAll((void *)&queue->Slots[slot].ReadTurn); // Hash table crawl.
 }
 int Dequeue(volatile struct Queue *queue)
 {
-	UINT32 ticket = InterlockedIncrementNoFence((volatile LONG *)&queue->ReadCursor) - 1; // Serialization with all readers.
+	UINT32 ticket = InterlockedIncrementNoFence((volatile LONG *)&queue->ReadTicket) - 1; // Acquire, serialization with all readers.
 	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 1); // Reads happen on odd cycles.
+	UINT8 turn = (UINT8)(ticket / CAPACITY + 1); // Read turns start at 1.
 
-	UINT8 currentCycle;
-	while ((currentCycle = queue->Slots[slot].Cycle) != cycle) // Acquire, serialization with 1 writer.
-		WaitOnAddress(&queue->Slots[slot].Cycle, &currentCycle, sizeof currentCycle, INFINITE);
+	UINT8 currentTurn;
+	while ((currentTurn = queue->Slots[slot].ReadTurn) != turn) // Acquire, serialization with 1 writer.
+		WaitOnAddress(&queue->Slots[slot].ReadTurn, &currentTurn, sizeof currentTurn, INFINITE);
 
 	int item = queue->Slots[slot].Item;
-	queue->Slots[slot].Cycle = cycle + 1; // Serialization with 1 writer.
-	WakeByAddressAll((void *)&queue->Slots[slot].Cycle); // Hash table crawl.
+	queue->Slots[slot].WriteTurn = turn; // Release, serialization with 1 writer.
+	WakeByAddressAll((void *)&queue->Slots[slot].WriteTurn); // Hash table crawl.
 	return item;
 }
 
 // Polling API
 
-BOOL TryEnequeue(volatile struct Queue *queue, int item)
+BOOL TryEnqueue(volatile struct Queue *queue, int item)
 {
-	UINT32 cursor = queue->WriteCursor; // Atomic load relaxed. Serialization with all writers.
+	UINT32 tryTicket = queue->WriteTicket; // Atomic load relaxed. Serialization with all writers.
 	for (;;)
 	{
-		UINT32 slot = cursor % CAPACITY;
-		UINT8 cycle = (UINT8)((cursor / CAPACITY) * 2 + 0);
-		UINT8 currentCycle = queue->Slots[slot].Cycle; // Serialization with 1 reader.
+		UINT32 slot = tryTicket % CAPACITY;
+		UINT8 turn = (UINT8)(tryTicket / CAPACITY); // Write turns start at 0.
+		UINT8 currentTurn = queue->Slots[slot].WriteTurn; // Acquire, serialization with 1 reader.
 		
-		int cyclesRemaining = (int)(cycle - currentCycle);
-		if (cyclesRemaining > 0)
+		int turnsRemaining = (int)(turn - currentTurn);
+		if (turnsRemaining > 0)
 			return FALSE;
-		if (cyclesRemaining < 0)
+		if (turnsRemaining == 0)
 		{
-			UINT32 newCursor = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->WriteCursor, cursor + 1, cursor); // Serialization with all readers.
-			if (newCursor == cursor)
+			UINT32 ticket = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->WriteTicket, tryTicket + 1, tryTicket); // Serialization with all readers.
+			if (ticket == tryTicket)
 			{
 				queue->Slots[slot].Item = item;
-				queue->Slots[slot].Cycle = cycle + 1; // Release, serialization with 1 reader.
-				WakeByAddressAll((void *)&queue->Slots[slot]); // Hash table crawl. Remove this if you only use Polling and not Blocking.
+				queue->Slots[slot].ReadTurn = turn + 1; // Release, serialization with 1 reader.
+				WakeByAddressAll((void *)&queue->Slots[slot].ReadTurn); // Hash table crawl. Remove this if you only use Polling and not Blocking.
 				return TRUE;
 			}
-			cursor = newCursor;
+			tryTicket = ticket;
 		}
-		else cursor = queue->WriteCursor;
+		else tryTicket = queue->WriteTicket;
 	}
 }
 BOOL TryDequeue(volatile struct Queue *queue, int *outItem)
 {
-	UINT32 cursor = queue->ReadCursor; // Atomic load relaxed. Serialization with all readers.
+	UINT32 tryTicket = queue->ReadTicket; // Atomic load relaxed. Serialization with all readers.
 	for (;;)
 	{
-		UINT32 slot = cursor % CAPACITY;
-		UINT8 cycle = (UINT8)((cursor / CAPACITY) * 2 + 1);
-		UINT8 currentCycle = queue->Slots[slot].Cycle; // Acquire, serialization with 1 writer.
+		UINT32 slot = tryTicket % CAPACITY;
+		UINT8 turn = (UINT8)(tryTicket / CAPACITY + 1); // Read turns start at 1.
+		UINT8 currentTurn = queue->Slots[slot].ReadTurn; // Acquire, serialization with 1 writer.
 
-		int cyclesRemaining = (int)(cycle - currentCycle);
-		if (cyclesRemaining > 0)
+		int turnsRemaining = (int)(turn - currentTurn);
+		if (turnsRemaining > 0)
 			return FALSE;
-		if (cyclesRemaining < 0)
+		if (turnsRemaining == 0)
 		{
-			UINT32 newCursor = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->WriteCursor, cursor + 1, cursor); // Serialization with all readers.
-			if (newCursor == cursor)
+			UINT32 ticket = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->ReadTicket, tryTicket + 1, tryTicket); // Serialization with all readers.
+			if (ticket == tryTicket)
 			{
 				(*outItem) = queue->Slots[slot].Item;
-				queue->Slots[slot].Cycle = cycle + 1; // Serialization with 1 writer.
-				WakeByAddressAll((void *)&queue->Slots[slot]); // Hash table crawl. Remove this if you only use Polling and not Blocking.
+				queue->Slots[slot].WriteTurn = turn; // Release, serialization with 1 writer.
+				WakeByAddressAll((void *)&queue->Slots[slot].WriteTurn); // Hash table crawl. Remove this if you only use Polling and not Blocking.
 				return TRUE;
 			}
-			cursor = newCursor;
+			tryTicket = ticket;
 		}
-		else cursor = queue->WriteCursor;
+		else tryTicket = queue->ReadTicket;
 	}
-}
-
-// Transactional API
-
-UINT32 ReserveEnqueue(volatile struct Queue *queue)
-{
-	// Once you call ReserveEnqueue, you *MUST* wait until CanEnqueue returns true, and then call CommitEnqueue.
-	return InterlockedIncrementNoFence((volatile LONG *)&queue->WriteCursor) - 1; // Serialization with all writers.
-}
-BOOL CanEnqueue(volatile struct Queue *queue, UINT32 ticket)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 0);
-	return queue->Slots[slot].Cycle == cycle; // Serialization with 1 reader.
-}
-void WaitEnqueue(volatile struct Queue *queue, UINT32 ticket)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 0);
-	UINT8 currentCycle;
-	while ((currentCycle = queue->Slots[slot].Cycle) != cycle) // Serialization with 1 reader.
-		WaitOnAddress(&queue->Slots[slot].Cycle, &currentCycle, sizeof currentCycle, INFINITE);
-}
-void CommitEnqueue(volatile struct Queue *queue, UINT32 ticket, int item)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 0);
-	queue->Slots[slot].Item = item;
-	queue->Slots[slot].Cycle = cycle + 1; // Release, serialization with 1 reader.
-	WakeByAddressAll((void *)&queue->Slots[slot]); // Hash table crawl.
-}
-UINT32 ReserveDequeue(volatile struct Queue *queue)
-{
-	// Once you call ReserveDequeue, you *MUST* wait until CanDequeue returns true, and then call CommitDequeue.
-	return InterlockedIncrementNoFence((volatile LONG *)&queue->ReadCursor) - 1; // Serialization with all writers.
-}
-BOOL CanDequeue(volatile struct Queue *queue, UINT32 ticket)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 1);
-	return queue->Slots[slot].Cycle == cycle; // Acquire, serialization with 1 writer.
-}
-void WaitDequeue(volatile struct Queue *queue, UINT32 ticket)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 1);
-	UINT8 currentCycle;
-	while ((currentCycle = queue->Slots[slot].Cycle) != cycle) // Acquire, serialization with 1 writer.
-		WaitOnAddress(&queue->Slots[slot].Cycle, &currentCycle, sizeof currentCycle, INFINITE);
-}
-int CommitDequeue(volatile struct Queue *queue, UINT32 ticket)
-{
-	UINT32 slot = ticket % CAPACITY;
-	UINT8 cycle = (UINT8)((ticket / CAPACITY) * 2 + 1);
-	int item = queue->Slots[slot].Item;
-	queue->Slots[slot].Cycle = cycle + 1; // Serialization with 1 writer.
-	WakeByAddressAll((void *)&queue->Slots[slot]); // Hash table crawl.
-	return item;
-}
-
-// Auxilary API
-
-int ApproximateCount(volatile struct Queue *queue)
-{
-	UINT32 write = queue->WriteCursor;
-	UINT32 read = queue->ReadCursor;
-	int count = (int)(write - read);
-	count = count < 0 ? 0 : count; // Count can be negative if there are outstanding reads.
-	count = count > CAPACITY ? CAPACITY : count; // Count can overflow if there are outstanding writes.
-	return count;
-}
-BOOL ApproximatelyEmpty(volatile struct Queue *queue)
-{
-	UINT32 write = queue->WriteCursor;
-	UINT32 read = queue->ReadCursor;
-	return read >= write;
-}
-BOOL ApproximatelyFull(volatile struct Queue *queue)
-{
-	UINT32 write = queue->WriteCursor;
-	UINT32 read = queue->ReadCursor;
-	int count = (int)(write - read);
-	return count >= CAPACITY;
 }
 
 // Test
@@ -208,13 +126,17 @@ DWORD __stdcall ReaderThread(void *parameter)
 	int lastWriterData[3] = { -1, -1, -1 };
 	for (int i = 0; i < 1000000; ++i)
 	{
-		int item = Dequeue(queue);
-		int writerId = item / 1000000;
+		int item;
+		if (i < 500000)
+			item = Dequeue(queue);
+		else
+			while (!TryDequeue(queue, &item));
+		int writer = item / 1000000;
 		int data = item % 1000000;
-		assert(writerId < 3); // Ensure no data corruption corruption.
-		InterlockedIncrement(&counters[writerId][data]);
-		assert(lastWriterData[writerId] < data); // Ensure data is correctly sequenced FIFO.
-		lastWriterData[writerId] = data;
+		assert(writer < 3); // Ensure no data corruption corruption.
+		InterlockedIncrement(&counters[writer][data]);
+		assert(lastWriterData[writer] < data); // Ensure data is correctly sequenced FIFO.
+		lastWriterData[writer] = data;
 	}
 
 	// Wait for all readers to finish.
@@ -225,9 +147,9 @@ DWORD __stdcall ReaderThread(void *parameter)
 	while ((numDone = doneCounter) != 3)
 		WaitOnAddress(&doneCounter, &numDone, sizeof numDone, INFINITE);
 
-	for (int writerId = 0; writerId < 3; ++writerId)
+	for (int writer = 0; writer < 3; ++writer)
 		for (int i = 0; i < 1000000; ++i)
-			assert(counters[writerId][i] == 1); // Ensure all items have been properly received.
+			assert(counters[writer][i] == 1); // Ensure all items have been properly received.
 
 	return EXIT_SUCCESS;
 }
@@ -236,8 +158,10 @@ DWORD __stdcall WriterThread(void *parameter)
 	struct Queue *queue = parameter;
 	static volatile LONG idDispenser;
 	LONG id = InterlockedIncrement(&idDispenser) - 1;
-	for (int i = 0; i < 1000000; ++i)
+	for (int i = 0; i < 500000; ++i)
 		Enqueue(queue, id * 1000000 + i);
+	for (int i = 500000; i < 1000000; ++i)
+		while (!TryEnqueue(queue, id * 1000000 + i));
 	return EXIT_SUCCESS;
 }
 int main(void)
