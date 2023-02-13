@@ -11,7 +11,7 @@ HANDLE Timer;
 int SchedulerPeriodMs;
 INT64 QpcPerSecond;
 
-void PerfectSleep(double seconds)
+void PreciseSleep(double seconds)
 {
 	LARGE_INTEGER qpc;
 	QueryPerformanceCounter(&qpc);
@@ -21,7 +21,7 @@ void PerfectSleep(double seconds)
 	{
 		const double TOLERANCE = 0.001'02;
 		INT64 maxTicks = (INT64)SchedulerPeriodMs * 9'500;
-		for (;;)
+		for (;;) // Break sleep up into parts that are lower than scheduler period.
 		{
 			double remainingSeconds = (targetQpc - qpc.QuadPart) / (double)QpcPerSecond;
 			INT64 sleepTicks = (INT64)((remainingSeconds - TOLERANCE) * 10'000'000);
@@ -35,17 +35,17 @@ void PerfectSleep(double seconds)
 			QueryPerformanceCounter(&qpc);
 		}
 	}
-	else // Fallback to RobustSleep.
+	else // Fallback to Sleep.
 	{
 		const double TOLERANCE = 0.000'02;
-		double sleepMs = (seconds - TOLERANCE) * 1000 - SchedulerPeriodMs;
+		double sleepMs = (seconds - TOLERANCE) * 1000 - SchedulerPeriodMs; // Sleep for 1 scheduler period less than requested.
 		int sleepSlices = (int)(sleepMs / SchedulerPeriodMs);
 		if (sleepSlices > 0)
 			Sleep((DWORD)sleepSlices * SchedulerPeriodMs);
 		QueryPerformanceCounter(&qpc);
 	}
 
-	while (qpc.QuadPart < targetQpc)
+	while (qpc.QuadPart < targetQpc) // Spin for any remaining time.
 	{
 		YieldProcessor();
 		QueryPerformanceCounter(&qpc);
@@ -69,7 +69,7 @@ int main(void)
 	{
 		LARGE_INTEGER qpc0, qpc1;
 		QueryPerformanceCounter(&qpc0);
-		PerfectSleep(1 / 60.0);
+		PreciseSleep(1 / 60.0);
 		QueryPerformanceCounter(&qpc1);
 		double dt = (qpc1.QuadPart - qpc0.QuadPart) / (double)QpcPerSecond;
 		printf("Slept for %.2f ms\n", 1000 * dt);
