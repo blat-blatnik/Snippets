@@ -239,6 +239,4 @@ int main(void) {
 	deallocate(&heap, h);
 	deallocate(&heap, f);
 	deallocate(&heap, g);
-
-	__debugbreak();
 }
