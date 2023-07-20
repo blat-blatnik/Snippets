@@ -50,7 +50,7 @@ void findslot(int size, int *listid, int *slotid) {
 	int pow2 = 1 << log2;
 	int left = size - pow2;
 	(*listid) = log2;
-	(*slotid) = left >> (log2 - 2); // (4 * left) / size
+	(*slotid) = left >> (log2 - 2); // (4 * left) / pow2
 }
 void add(struct heap *heap, struct node *node, int size) {
 	// mark the node as free
@@ -109,7 +109,7 @@ void expand(struct heap *heap, void *memory, int size) {
 	assert(size % sizeof(struct node) == 0);
 
 	// carve out a dummy node at the end
-	void *end = (char *)memory + size - sizeof(struct node) + sizeof(struct node *);
+	void *end = (char *)memory + size - sizeof(struct node);
 	struct node *footer = end;
 	footer->size = 0;
 	footer->next = 0;
