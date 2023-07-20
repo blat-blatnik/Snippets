@@ -1,9 +1,10 @@
-// O(log N) allocation
-// O(log N) deallocation
-// avg 1/4 memory wasted
+// O(log N) allocation and deallocation
+// 1/4 memory wasted on average, best fit
 // 2 pointer header, 16/8 byte on 64/32-bit
+// 16/8 byte min allocation on 64/32-bit
+// cannot be expanded at runtime
 
-#include <stdint.h> // intptr_t, uintptr_t
+#include <stdint.h> // intptr_t
 #include <string.h> // memcpy
 #include <assert.h>
 
@@ -52,7 +53,6 @@ void initialize(struct heap *heap, void *memory, int capacity) {
 	node->next = list;
 	node->prev = list;
 }
-
 void *allocate(struct heap *heap, int size) {
 	// you could clamp to 0, or return NULL
 	assert(size >= 0);
@@ -86,16 +86,15 @@ void *allocate(struct heap *heap, int size) {
 	}
 	return 0;
 }
-
 void deallocate(struct heap *heap, void *block) {
 	if (!block)
 		return;
 
 	assert(block >= heap->memory); // block isn't from this heap
-	
+
 	void *header = (char *)block - sizeof(union node);
 	union node *node = header;
-	
+
 	assert(!node->free); // double free
 	assert((char *)node + node->size <= (char *)heap->memory + heap->capacity); // block isn't from this heap.
 
@@ -124,7 +123,6 @@ void deallocate(struct heap *heap, void *block) {
 	list->next->prev = node;
 	list->next = node;
 }
-
 void *reallocate(struct heap *heap, void *block, int size) {
 	// you could clamp to 0, or return NULL
 	assert(size >= 0);
@@ -137,10 +135,10 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	}
 
 	assert(block >= heap->memory); // block isn't from this heap
-	
+
 	void *header = (char *)block - sizeof(union node);
 	union node *node = header;
-	
+
 	assert(!node->free); // double free
 	assert((char *)node + node->size <= (char *)heap->memory + heap->capacity); // block isn't from this heap.
 
@@ -175,7 +173,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 		// we couldn't reallocate in-place so undo any growth we've done
 		while (node->size > oldsize) {
 			node->size /= 2;
-			
+
 			void *memory = (char *)node + node->size;
 			union node *buddy = memory;
 			buddy->free = 1;
@@ -192,6 +190,8 @@ void *reallocate(struct heap *heap, void *block, int size) {
 
 		// make a new allocation and copy the old one
 		void *copy = allocate(heap, size);
+		if (!copy)
+			return 0; // out of memory
 		memcpy(copy, block, (size_t)node->size);
 		deallocate(heap, block);
 		return copy;
