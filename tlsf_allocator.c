@@ -139,6 +139,9 @@ void *allocate(struct heap *heap, int size) {
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
+	// align up
+	needed = (needed + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+
 	// first check the exact size range for the needed amount
 	int listid, slotid;
 	findslot(needed, &listid, &slotid);
@@ -223,6 +226,9 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
+	// align up
+	needed = (needed + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+
 	if (needed > (node->size & SIZE_MASK)) {
 		// we need to grow, try expanding into the next block if it's free
 		struct node *next = nextnode(node);
@@ -296,6 +302,12 @@ void verify(struct heap *heap) {
 				// there should never be 2 consecutive free nodes - they should be combined
 				assert(!(node->size & PREV_FREE_BIT));
 				assert(!(next->size & FREE_BIT));
+
+				// the node should be properly aligned.
+				uintptr_t block = (uintptr_t)node2block(node);
+				uintptr_t nextblock = (uintptr_t)node2block(next);
+				assert(block % ALIGNMENT == 0);
+				assert(nextblock % ALIGNMENT == 0);
 			}
 		}
 	}
@@ -321,6 +333,7 @@ int main(void) {
 	char *g = allocate(&heap, 3); verify(&heap); memset(g, 1, 3);
 	char *h = allocate(&heap, 4); verify(&heap); memset(h, 1, 4);
 	char *i = allocate(&heap, 5); verify(&heap); memset(i, 1, 5);
+	char *j = allocate(&heap, 23); verify(&heap); memset(j, 1, 23);
 	i = reallocate(&heap, i, 100); verify(&heap); memset(i, 1, 100);
 	d = reallocate(&heap, d, 256); verify(&heap); memset(d, 1, 256);
 	i = reallocate(&heap, i, 5); verify(&heap); memset(i, 1, 5);
@@ -330,4 +343,5 @@ int main(void) {
 	deallocate(&heap, h); verify(&heap);
 	deallocate(&heap, f); verify(&heap);
 	deallocate(&heap, g); verify(&heap);
+	deallocate(&heap, j); verify(&heap);
 }
