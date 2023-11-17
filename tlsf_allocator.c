@@ -14,8 +14,8 @@
 #define SIZE_MASK (~(FREE_BIT | PREV_FREE_BIT))
 
 struct node {
-	struct node *prevnode; // this is actually at the end of the *previous* node's block
-	int size; // last 2 bits of the size are used as bitfields: FREE_BIT | PREV_FREE_BIT
+	struct node *prevnode; // this is actually at the end of the *previous* node's block, only valid if previous node is free
+	int size; // includes size of node, last 2 bits of the are used as bitfields: FREE_BIT | PREV_FREE_BIT
 	struct node *next; // only valid if node is free
 	struct node *prev; // only valid if node is free
 };
@@ -112,7 +112,7 @@ void expand(struct heap *heap, void *memory, int size) {
 	assert(size > sizeof(struct node));
 	assert(size % sizeof(struct node) == 0);
 
-	// carve out a dummy node at the end
+	// carve out a sentinel node at the end
 	void *end = (char *)memory + size - sizeof(struct node);
 	struct node *footer = end;
 	footer->size = 0;
@@ -139,7 +139,7 @@ void initialize(struct heap *heap) {
 void *allocate(struct heap *heap, int size) {
 	assert(size >= 0); // you could clamp to 0, or return NULL
 
-	int needed = size + ALIGNMENT;
+	int needed = size + sizeof(void *); // need extra space for size
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
@@ -227,7 +227,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	struct node *node = block2node(block);
 	assert(!(node->size & FREE_BIT)); // use after free
 
-	int needed = size + ALIGNMENT;
+	int needed = size + sizeof(void *); // need extra space for size
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
@@ -317,6 +317,12 @@ void verify(struct heap *heap) {
 		}
 	}
 }
+int equal(char *bytes, char value, int count) {
+	for (int i = 0; i < count; ++i)
+		if (bytes[i] != value)
+			return 0;
+	return 1;
+}
 
 int main(void) {
 	struct heap heap;
@@ -326,22 +332,32 @@ int main(void) {
 	expand(&heap, memory, sizeof memory);
 
 	char *a = allocate(&heap, 256); verify(&heap); memset(a, 1, 256);
-	char *b = allocate(&heap, 256); verify(&heap); memset(b, 1, 256);
+	char *b = allocate(&heap, 256); verify(&heap); memset(b, 2, 256);
+	assert(equal(a, 1, 256));
 	deallocate(&heap, a); verify(&heap);
-	char *c = allocate(&heap, 256); verify(&heap); memset(c, 1, 256);
+	char *c = allocate(&heap, 256); verify(&heap); memset(c, 3, 256);
 	deallocate(&heap, c); verify(&heap);
+	assert(equal(b, 2, 256));
 	deallocate(&heap, b); verify(&heap);
 
-	char *d = allocate(&heap, 0); verify(&heap); memset(d, 1, 0);
-	char *e = allocate(&heap, 1); verify(&heap); memset(e, 1, 1);
-	char *f = allocate(&heap, 2); verify(&heap); memset(f, 1, 2);
-	char *g = allocate(&heap, 3); verify(&heap); memset(g, 1, 3);
-	char *h = allocate(&heap, 4); verify(&heap); memset(h, 1, 4);
-	char *i = allocate(&heap, 5); verify(&heap); memset(i, 1, 5);
-	char *j = allocate(&heap, 23); verify(&heap); memset(j, 1, 23);
-	i = reallocate(&heap, i, 100); verify(&heap); memset(i, 1, 100);
-	d = reallocate(&heap, d, 256); verify(&heap); memset(d, 1, 256);
-	i = reallocate(&heap, i, 5); verify(&heap); memset(i, 1, 5);
+	char *d = allocate(&heap, 0); verify(&heap); memset(d, 4, 0);
+	char *e = allocate(&heap, 1); verify(&heap); memset(e, 5, 1);
+	char *f = allocate(&heap, 2); verify(&heap); memset(f, 6, 2);
+	char *g = allocate(&heap, 3); verify(&heap); memset(g, 7, 3);
+	char *h = allocate(&heap, 4); verify(&heap); memset(h, 8, 4);
+	char *i = allocate(&heap, 5); verify(&heap); memset(i, 9, 5);
+	char *j = allocate(&heap, 23); verify(&heap); memset(j, 10, 23);
+	i = reallocate(&heap, i, 100); verify(&heap); memset(i, 11, 100);
+	d = reallocate(&heap, d, 256); verify(&heap); memset(d, 12, 256);
+	i = reallocate(&heap, i, 5); verify(&heap); memset(i, 13, 5);
+	assert(equal(d, 12, 256));
+	assert(equal(e, 5, 1));
+	assert(equal(f, 6, 2));
+	assert(equal(g, 7, 3));
+	assert(equal(h, 8, 4));
+	assert(equal(i, 13, 5));
+	assert(equal(j, 10, 23));
+
 	deallocate(&heap, d); verify(&heap);
 	deallocate(&heap, i); verify(&heap);
 	deallocate(&heap, e); verify(&heap);
