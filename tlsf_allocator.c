@@ -114,10 +114,8 @@ void expand(struct heap *heap, void *memory, int size) {
 
 	// carve out a sentinel node at the end
 	void *end = (char *)memory + size - sizeof(struct node);
-	struct node *footer = end;
-	footer->size = 0;
-	footer->next = 0;
-	footer->prev = 0;
+	struct node *sentinel = end;
+	sentinel->size = 0;
 
 	// add the root node to the list
 	void *p = (char *)memory - sizeof(struct node *);
@@ -139,7 +137,7 @@ void initialize(struct heap *heap) {
 void *allocate(struct heap *heap, int size) {
 	assert(size >= 0); // you could clamp to 0, or return NULL
 
-	int needed = size + sizeof(void *); // need extra space for size
+	int needed = size + ALIGNMENT; // need extra space for size and to align allocation
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
@@ -227,7 +225,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	struct node *node = block2node(block);
 	assert(!(node->size & FREE_BIT)); // use after free
 
-	int needed = size + sizeof(void *); // need extra space for size
+	int needed = size + ALIGNMENT; // need extra space for size and to align allocation
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
