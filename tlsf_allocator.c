@@ -26,9 +26,15 @@ struct heap {
 	struct node freelists[32][4];
 };
 
-#define block2node(block) ((struct node *)((char *)(block) - (sizeof(struct node *) + ALIGNMENT)))
-#define node2block(n) ((char *)&(n)->size + ALIGNMENT)
-#define nextnode(n) ((struct node *)((char *)&(n)->size + ((n)->size & SIZE_MASK) - sizeof(struct node *)))
+void *node2block(struct node *n) {
+	return (char *)&(n)->size + ALIGNMENT;
+}
+struct node *block2node(void* block) {
+	return (struct node *)((char *)block - (sizeof(struct node *) + ALIGNMENT));
+}
+struct node *nextnode(struct node *n) {
+	return (struct node *)((char *)&(n)->size + ((n)->size & SIZE_MASK) - sizeof(struct node *));
+}
 
 int findfirstset(int x) {
 	// _BitScanForward(&i, x) on msvc, __builtin_ffs(x) - 1 on gcc/clang
@@ -84,6 +90,7 @@ void remove(struct heap *heap, struct node *node) {
 	int *slotmap = &heap->slotmaps[listid];
 
 	// remove the node from the freelist
+	assert(node->size & FREE_BIT);
 	node->size &= ~FREE_BIT;
 	node->prev->next = node->next;
 	node->next->prev = node->prev;
@@ -96,11 +103,8 @@ void remove(struct heap *heap, struct node *node) {
 	if (!(*slotmap))
 		heap->listmap &= ~(1 << listid);
 
-	// unlink the node
-	node->prev->next = node->next;
-	node->next->prev = node->prev;
-
 	struct node *next = nextnode(node);
+	assert(next->size & PREV_FREE_BIT);
 	next->size &= ~PREV_FREE_BIT;
 }
 
@@ -204,6 +208,7 @@ void deallocate(struct heap *heap, void *block) {
 	}
 
 	// mark on the next node that we are free
+	assert(!(next->size & PREV_FREE_BIT)); // corruption
 	next->size |= PREV_FREE_BIT;
 
 	add(heap, node, node->size);
