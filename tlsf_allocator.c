@@ -33,7 +33,7 @@ struct node *block2node(void* block) {
 	return (struct node *)((char *)block - (sizeof(struct node *) + ALIGNMENT));
 }
 struct node *nextnode(struct node *n) {
-	return (struct node *)((char *)&(n)->size + ((n)->size & SIZE_MASK) - sizeof(struct node *));
+	return (struct node *)((char *)n + (n->size & SIZE_MASK));
 }
 
 int findfirstset(int x) {
