@@ -27,7 +27,7 @@ struct heap {
 };
 
 void *node2block(struct node *n) {
-	return (char *)&(n)->size + ALIGNMENT;
+	return (char *)n + sizeof(struct node *) + ALIGNMENT;
 }
 struct node *block2node(void* block) {
 	return (struct node *)((char *)block - (sizeof(struct node *) + ALIGNMENT));
@@ -60,12 +60,13 @@ void findslot(int size, int *listid, int *slotid) {
 }
 void add(struct heap *heap, struct node *node, int size) {
 	// mark the node as free
+	assert((size & SIZE_MASK) > 0);
 	node->size = size | FREE_BIT;
 
 	// write the footer
-	struct node *tail = nextnode(node);
-	tail->prevnode = node;
-	tail->size |= PREV_FREE_BIT;
+	struct node *next = nextnode(node);
+	next->prevnode = node;
+	next->size |= PREV_FREE_BIT;
 
 	// find where the node goes
 	int listid, slotid;
@@ -108,7 +109,7 @@ void remove(struct heap *heap, struct node *node) {
 	next->size &= ~PREV_FREE_BIT;
 }
 
-void expand(struct heap *heap, void *memory, int size) {
+void grow(struct heap *heap, void *memory, int size) {
 	assert(size > sizeof(struct node));
 	assert(size % sizeof(struct node) == 0);
 
@@ -207,7 +208,6 @@ void deallocate(struct heap *heap, void *block) {
 		remove(heap, prev);
 		prev->size += (node->size & SIZE_MASK);
 		node = prev;
-		assert(!(node->size & PREV_FREE_BIT)); // 2 consecutive free nodes.
 	}
 
 	// merge with next free node
@@ -217,7 +217,7 @@ void deallocate(struct heap *heap, void *block) {
 		remove(heap, next);
 		node->size += next->size;
 		next = nextnode(node);
-		assert(!(next->size & FREE_BIT)); // 2 consecutive free nodes
+		assert(!(next->size & FREE_BIT)); // there shouldn't be 2 consecutive free nodes
 	}
 
 	// mark on the next node that we are free
@@ -258,7 +258,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 			void *copy = allocate(heap, size);
 			if (!copy)
 				return 0; // out of memory
-			memcpy(copy, block, (size_t)node->size - ALIGNMENT);
+			memcpy(copy, block, (size_t)(node->size & SIZE_MASK) - ALIGNMENT);
 			deallocate(heap, block);
 			return copy;
 		}
@@ -309,10 +309,12 @@ void verify(struct heap *heap) {
 	for (int i = 0; i < 32; ++i) {
 		for (int j = 0; j < 4; ++j) {
 			struct node *list = &heap->freelists[i][j];
-			int k = 0;
 			for (struct node *node = list->next; node != list; node = node->next) {
 				// every node in the freelist should be free
 				assert(node->size & FREE_BIT);
+
+				// free nodes cannot be empty
+				assert(node->size & SIZE_MASK);
 
 				// the next node needs to know if we're free
 				struct node *next = nextnode(node);
@@ -327,8 +329,6 @@ void verify(struct heap *heap) {
 				uintptr_t nextblock = (uintptr_t)node2block(next);
 				assert(block % ALIGNMENT == 0);
 				assert(nextblock % ALIGNMENT == 0);
-
-				++k;
 			}
 		}
 	}
@@ -346,7 +346,7 @@ int main(void) {
 	initialize(&heap);
 
 	static char memory[1024];
-	expand(&heap, memory, sizeof memory);
+	grow(&heap, memory, sizeof memory);
 
 	char *a = allocate(&heap, 256); verify(&heap); memset(a, 1, 256);
 	char *b = allocate(&heap, 256); verify(&heap); memset(b, 2, 256);
@@ -412,7 +412,7 @@ int main(void) {
 	// grow
 
 	static char extra[1024];
-	expand(&heap, extra, sizeof extra);
+	grow(&heap, extra, sizeof extra);
 	char *y = NULL;
 
 	// both up
