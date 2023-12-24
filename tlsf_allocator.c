@@ -8,7 +8,7 @@
 #include <string.h> // memcpy
 #include <assert.h>
 
-#define ALIGNMENT 8 // only 4, 8, or 16 allowed
+#define ALIGNMENT 4 // only 4, 8, or 16 allowed
 #define FREE_BIT (1 << 0)
 #define PREV_FREE_BIT (1 << 1)
 #define SIZE_MASK (~(FREE_BIT | PREV_FREE_BIT))
@@ -92,8 +92,10 @@ void remove(struct heap *heap, struct node *node) {
 	// remove the node from the freelist
 	assert(node->size & FREE_BIT);
 	node->size &= ~FREE_BIT;
-	node->prev->next = node->next;
-	node->next->prev = node->prev;
+	struct node *n = node->next;
+	struct node *p = node->prev;
+	node->prev->next = n;
+	node->next->prev = p;
 
 	// if the slot becomes empty, clear it's bitmap bit
 	if (list->next == list)
@@ -112,15 +114,14 @@ void expand(struct heap *heap, void *memory, int size) {
 	assert(size > sizeof(struct node));
 	assert(size % sizeof(struct node) == 0);
 
-	// carve out a sentinel node at the end
-	void *end = (char *)memory + size - sizeof(struct node);
-	struct node *sentinel = end;
+	// carve out a sentinel node with just the size flags at the end
+	struct node *sentinel = block2node((char *)memory + size);
 	sentinel->size = 0;
 
 	// add the root node to the list
 	void *p = (char *)memory - sizeof(struct node *);
 	struct node *root = p;
-	add(heap, root, size - sizeof(struct node));
+	add(heap, root, size - ALIGNMENT);
 }
 void initialize(struct heap *heap) {
 	memset(heap, 0, sizeof(struct heap));
@@ -137,7 +138,8 @@ void initialize(struct heap *heap) {
 void *allocate(struct heap *heap, int size) {
 	assert(size >= 0); // you could clamp to 0, or return NULL
 
-	int needed = size + ALIGNMENT; // need extra space for size and to align allocation
+	// need extra space for size and to align allocation
+	int needed = size + ALIGNMENT;
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
@@ -145,8 +147,20 @@ void *allocate(struct heap *heap, int size) {
 	needed = (needed + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
 
 	// first check the exact size range for the needed amount
-	int listid, slotid;
-	findslot(needed, &listid, &slotid);
+	// special findslot that rounds up instead of down
+	int log2 = floorlog2(needed);
+	int pow2 = 1 << log2;
+	int left = needed - pow2;
+	int listid = log2;
+	int slotid = left >> (log2 - 2); // (4 * left / pow2)
+	if (left) {
+		++slotid;
+		if (slotid == 4) {
+			slotid = 0;
+			++listid;
+		}
+	}
+
 	int slotmask = ~((1 << slotid) - 1);
 	if (!(heap->slotmaps[listid] & slotmask)) {
 		// the best fitting size range is empty so don't consider it
@@ -167,6 +181,7 @@ void *allocate(struct heap *heap, int size) {
 	// remove the node from the freelist
 	struct node *list = &heap->freelists[listid][slotid];
 	struct node *node = list->next;
+	assert(node->size >= needed);
 	remove(heap, node);
 
 	// trim the excess off
@@ -194,15 +209,17 @@ void deallocate(struct heap *heap, void *block) {
 		remove(heap, prev);
 		prev->size += (node->size & SIZE_MASK);
 		node = prev;
+		assert(!(node->size & PREV_FREE_BIT)); // 2 consecutive free nodes.
 	}
 
 	// merge with next free node
 	struct node *next = nextnode(node);
 	if (next->size & FREE_BIT) {
+		assert(!(next->size & PREV_FREE_BIT)); // next node thinks we're free but we aren't
 		remove(heap, next);
-		node->size += (next->size & SIZE_MASK);
-		next->size = 0;
+		node->size += next->size;
 		next = nextnode(node);
+		assert(!(next->size & FREE_BIT)); // 2 consecutive free nodes
 	}
 
 	// mark on the next node that we are free
@@ -225,7 +242,8 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	struct node *node = block2node(block);
 	assert(!(node->size & FREE_BIT)); // use after free
 
-	int needed = size + ALIGNMENT; // need extra space for size and to align allocation
+	// need extra space for size and to align allocation
+	int needed = size + ALIGNMENT;
 	if (needed < sizeof(struct node))
 		needed = sizeof(struct node);
 
@@ -242,7 +260,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 			void *copy = allocate(heap, size);
 			if (!copy)
 				return 0; // out of memory
-			memcpy(copy, block, (size_t)node->size);
+			memcpy(copy, block, (size_t)node->size - ALIGNMENT);
 			deallocate(heap, block);
 			return copy;
 		}
@@ -253,7 +271,7 @@ void *reallocate(struct heap *heap, void *block, int size) {
 	}
 
 	// trim off any excess
-	int excess = node->size - needed;
+	int excess = (node->size & SIZE_MASK) - needed;
 	if (excess >= sizeof(struct node)) {
 		node->size -= excess;
 		struct node *left = nextnode(node);
@@ -263,9 +281,8 @@ void *reallocate(struct heap *heap, void *block, int size) {
 		if (next->size & FREE_BIT) {
 			remove(heap, next);
 			left->size += (next->size & SIZE_MASK);
-			next->size = 0;
 		}
-		add(heap, left, excess);
+		add(heap, left, left->size);
 	}
 
 	return block;
@@ -294,6 +311,7 @@ void verify(struct heap *heap) {
 	for (int i = 0; i < 32; ++i) {
 		for (int j = 0; j < 4; ++j) {
 			struct node *list = &heap->freelists[i][j];
+			int k = 0;
 			for (struct node *node = list->next; node != list; node = node->next) {
 				// every node in the freelist should be free
 				assert(node->size & FREE_BIT);
@@ -311,11 +329,14 @@ void verify(struct heap *heap) {
 				uintptr_t nextblock = (uintptr_t)node2block(next);
 				assert(block % ALIGNMENT == 0);
 				assert(nextblock % ALIGNMENT == 0);
+
+				++k;
 			}
 		}
 	}
 }
 int equal(char *bytes, char value, int count) {
+	assert(bytes);
 	for (int i = 0; i < count; ++i)
 		if (bytes[i] != value)
 			return 0;
@@ -337,7 +358,7 @@ int main(void) {
 	deallocate(&heap, c); verify(&heap);
 	assert(equal(b, 2, 256));
 	deallocate(&heap, b); verify(&heap);
-
+	
 	char *d = allocate(&heap, 0); verify(&heap); memset(d, 4, 0);
 	char *e = allocate(&heap, 1); verify(&heap); memset(e, 5, 1);
 	char *f = allocate(&heap, 2); verify(&heap); memset(f, 6, 2);
@@ -355,7 +376,7 @@ int main(void) {
 	assert(equal(h, 8, 4));
 	assert(equal(i, 13, 5));
 	assert(equal(j, 10, 23));
-
+	
 	deallocate(&heap, d); verify(&heap);
 	deallocate(&heap, i); verify(&heap);
 	deallocate(&heap, e); verify(&heap);
@@ -363,4 +384,87 @@ int main(void) {
 	deallocate(&heap, f); verify(&heap);
 	deallocate(&heap, g); verify(&heap);
 	deallocate(&heap, j); verify(&heap);
+
+	// stress tests
+
+	int maxsize = 500;
+	char *x = NULL;
+
+	// one up
+	for (int size = 0; size < maxsize; ++size) {
+		x = reallocate(&heap, x, size); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, size - 1));
+		memset(x, size, size);
+		verify(&heap);
+	}
+	x = reallocate(&heap, x, 0);
+	verify(&heap);
+
+	// one down
+	for (int size = 0; size < maxsize; ++size) {
+		int ezis = maxsize - size;
+		x = reallocate(&heap, x, ezis); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, ezis));
+		memset(x, size, ezis);
+		verify(&heap);
+	}
+	x = reallocate(&heap, x, 0);
+	verify(&heap);
+
+	// grow
+
+	static char extra[1024];
+	expand(&heap, extra, sizeof extra);
+	char *y = NULL;
+
+	// both up
+	for (int size = 0; size < maxsize; ++size) {
+		verify(&heap);
+		x = reallocate(&heap, x, size); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, size - 1));
+		assert(size == 0 || equal(y, size - 1, size - 1));
+		y = reallocate(&heap, y, size); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, size - 1));
+		assert(size == 0 || equal(y, size - 1, size - 1));
+		memset(x, size, size);
+		memset(y, size, size);
+		verify(&heap);
+	}
+	x = reallocate(&heap, x, 0);
+	y = reallocate(&heap, y, 0);
+	verify(&heap);
+
+	// both down
+	for (int size = 0; size < maxsize; ++size) {
+		int ezis = maxsize - size;
+		x = reallocate(&heap, x, ezis); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, ezis));
+		assert(size == 0 || equal(y, size - 1, ezis + 1));
+		y = reallocate(&heap, y, ezis); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, ezis));
+		assert(size == 0 || equal(y, size - 1, ezis));
+		memset(x, size, ezis);
+		memset(y, size, ezis);
+		verify(&heap);
+	}
+	x = reallocate(&heap, x, 0);
+	y = reallocate(&heap, y, 0);
+	verify(&heap);
+
+	// one up, one down
+	for (int size = 0; size < maxsize; ++size) {
+		int ezis = maxsize - size;
+		x = reallocate(&heap, x, size); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, size - 1));
+		assert(size == 0 || equal(y, size - 1, ezis + 1));
+		y = reallocate(&heap, y, ezis); verify(&heap);
+		assert(size == 0 || equal(x, size - 1, size - 1));
+		assert(size == 0 || equal(y, size - 1, ezis));
+		memset(x, size, size);
+		memset(y, size, ezis);
+		verify(&heap);
+	}
+	x = reallocate(&heap, x, 0);
+	y = reallocate(&heap, y, 0);
+	verify(&heap);
 }
