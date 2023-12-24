@@ -92,10 +92,8 @@ void remove(struct heap *heap, struct node *node) {
 	// remove the node from the freelist
 	assert(node->size & FREE_BIT);
 	node->size &= ~FREE_BIT;
-	struct node *n = node->next;
-	struct node *p = node->prev;
-	node->prev->next = n;
-	node->next->prev = p;
+	node->prev->next = node->next;
+	node->next->prev = node->prev;
 
 	// if the slot becomes empty, clear it's bitmap bit
 	if (list->next == list)
