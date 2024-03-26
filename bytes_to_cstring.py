@@ -35,7 +35,6 @@ def bytes_to_cstring(name: str, data: bytes, maxwidth: int) -> str:
 		elif ord('0') <= byte <= ord('9'):
 			if prevoct:
 				line += '\\%o' % byte
-				prevoct = True
 			else:
 				line += chr(byte)
 		elif ord(' ') <= byte <= ord('~'):
@@ -44,7 +43,12 @@ def bytes_to_cstring(name: str, data: bytes, maxwidth: int) -> str:
 		else:
 			line += '\\%o' % byte
 			prevoct = True
+	if len(line) > 0:
+		lines.append('\t"'+line+'"')
 	result = ''
 	result += 'static const unsigned char '+name+'['+str(len(data))+'] =\n'
 	result += '\n'.join(lines)+';\n'
 	return result
+
+TEST = bytes([55, 138, 87, 147, 13, 123, 230, 172, 237, 133])
+print(bytes_to_cstring('TEST', TEST, 80))
