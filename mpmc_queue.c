@@ -3,7 +3,7 @@
 // - Wait-free unless the queue is full on write or empty on read.
 // - If full on write or empty on read, caller yields to the OS scheduler. Increases latency but conserves power.
 // - Only 1 atomic increment and 2 serialization points per call in the fast case.
-// - Only 1 byte overhead per queue slot.
+// - Only 2 bytes overhead per queue slot.
 // - Polling versions of calls are possible.
 // - Queue is initialized to all 0.
 // - No memory allocations or thread local storage.
@@ -36,7 +36,7 @@ void Enqueue(volatile struct Queue *queue, int item)
 
 	UINT8 currentTurn;
 	while ((currentTurn = queue->Slots[slot].WriteTurn) != turn) // Acquire, Serialization with 1 reader.
-		WaitOnAddress(&queue->Slots[slot].WriteTurn, &currentTurn, sizeof currentTurn, INFINITE);
+		WaitOnAddress(&queue->Slots[slot].WriteTurn, &currentTurn, sizeof currentTurn, INFINITE); // Block while queue is full.
 
 	queue->Slots[slot].Item = item;
 	queue->Slots[slot].ReadTurn = turn + 1; // Release, serialization with 1 reader.
@@ -50,7 +50,7 @@ int Dequeue(volatile struct Queue *queue)
 
 	UINT8 currentTurn;
 	while ((currentTurn = queue->Slots[slot].ReadTurn) != turn) // Acquire, serialization with 1 writer.
-		WaitOnAddress(&queue->Slots[slot].ReadTurn, &currentTurn, sizeof currentTurn, INFINITE);
+		WaitOnAddress(&queue->Slots[slot].ReadTurn, &currentTurn, sizeof currentTurn, INFINITE); // Block while queue is empty.
 
 	int item = queue->Slots[slot].Item;
 	queue->Slots[slot].WriteTurn = turn; // Release, serialization with 1 writer.
@@ -71,7 +71,7 @@ BOOL TryEnqueue(volatile struct Queue *queue, int item)
 		
 		int turnsRemaining = (int)(turn - currentTurn);
 		if (turnsRemaining > 0)
-			return FALSE;
+			return FALSE; // Queue is full.
 		if (turnsRemaining == 0)
 		{
 			UINT32 ticket = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->WriteTicket, tryTicket + 1, tryTicket); // Serialization with all readers.
@@ -84,7 +84,7 @@ BOOL TryEnqueue(volatile struct Queue *queue, int item)
 			}
 			tryTicket = ticket;
 		}
-		else tryTicket = queue->WriteTicket;
+		else tryTicket = queue->WriteTicket; // Another writer beat us to it, try again.
 	}
 }
 BOOL TryDequeue(volatile struct Queue *queue, int *outItem)
@@ -98,7 +98,7 @@ BOOL TryDequeue(volatile struct Queue *queue, int *outItem)
 
 		int turnsRemaining = (int)(turn - currentTurn);
 		if (turnsRemaining > 0)
-			return FALSE;
+			return FALSE; // Queue is empty.
 		if (turnsRemaining == 0)
 		{
 			UINT32 ticket = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->ReadTicket, tryTicket + 1, tryTicket); // Serialization with all readers.
@@ -111,7 +111,7 @@ BOOL TryDequeue(volatile struct Queue *queue, int *outItem)
 			}
 			tryTicket = ticket;
 		}
-		else tryTicket = queue->ReadTicket;
+		else tryTicket = queue->ReadTicket; // Another reader beat us to it, try again.
 	}
 }
 
@@ -133,7 +133,7 @@ DWORD __stdcall ReaderThread(void *parameter)
 			while (!TryDequeue(queue, &item));
 		int writer = item / 1000000;
 		int data = item % 1000000;
-		assert(writer < 3); // Ensure no data corruption corruption.
+		assert(writer < 3); // Ensure no data corruption.
 		InterlockedIncrement(&counters[writer][data]);
 		assert(lastWriterData[writer] < data); // Ensure data is correctly sequenced FIFO.
 		lastWriterData[writer] = data;

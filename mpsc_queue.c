@@ -20,7 +20,7 @@ void Enqueue(volatile struct Queue *queue, int item)
 
 	UINT8 currentTurn;
 	while ((currentTurn = queue->Slots[slot].Turn) != turn) // Acquire, serialization with reader.
-		WaitOnAddress(&queue->Slots[slot].Turn, &currentTurn, sizeof currentTurn, INFINITE);
+		WaitOnAddress(&queue->Slots[slot].Turn, &currentTurn, sizeof currentTurn, INFINITE); // Block while queue is full.
 	
 	queue->Slots[slot].Item = item;
 	queue->Slots[slot].Full = TRUE; // Release, serialization with reader.
@@ -34,7 +34,7 @@ int Dequeue(volatile struct Queue *queue)
 
 	UINT8 notFull = FALSE;
 	while (!queue->Slots[slot].Full) // Acquire, serialization with 1 writer.
-		WaitOnAddress(&queue->Slots[slot].Full, &notFull, sizeof notFull, INFINITE);
+		WaitOnAddress(&queue->Slots[slot].Full, &notFull, sizeof notFull, INFINITE); // Block while queue is empty.
 	
 	int item = queue->Slots[slot].Item;
 	queue->Slots[slot].Full = FALSE;
@@ -58,7 +58,7 @@ BOOL TryEnqueue(volatile struct Queue *queue, int item)
 		if (turnsRemaining > 0)
 			return FALSE; // Queue is full.
 		else if (turnsRemaining < 0)
-			tryTicket = queue->WriteTicket; // Turn increased in between us getting the ticket and now: someone lapped us.
+			tryTicket = queue->WriteTicket; // Another writer lapped us, try again.
 		else
 		{
 			UINT32 ticket = InterlockedCompareExchangeNoFence((volatile LONG *)&queue->WriteTicket, tryTicket + 1, tryTicket); // Serialization with writers.
@@ -78,7 +78,7 @@ BOOL TryDequeue(volatile struct Queue *queue, int *outItem)
 	UINT32 ticket = queue->ReadTicket;
 	UINT32 slot = ticket % CAPACITY;
 	if (!queue->Slots[slot].Full) // Acquire, serialization with 1 writer.
-		return FALSE;
+		return FALSE; // Queue is empty.
 
 	UINT8 turn = (UINT8)(ticket / CAPACITY);
 	(*outItem) = queue->Slots[slot].Item;

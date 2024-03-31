@@ -3,7 +3,7 @@
 // - Wait-free unless the queue is full on write or empty on read.
 // - If full on write or empty on read, caller yields to the OS scheduler. Increases latency but conserves power.
 // - Only 1 atomic increment and 2 serialization points per call in the fast case.
-// - Only 1 byte overhead per queue slot.
+// - Only 2 bytes overhead per queue slot.
 // - Polling versions of calls are possible.
 // - Queue is initialized to all 0.
 // - No memory allocations or thread local storage.
@@ -11,16 +11,18 @@
 
 #include <stdint.h>
 #include <atomic>
+using namespace std;
+using enum std::memory_order;
 
 #define CAPACITY 16384 // Must be a power of 2.
 
 struct Queue {
-	alignas(64) std::atomic<uint32_t> write_ticket = 0;
-	alignas(64) std::atomic<uint32_t> read_ticket = 0;
+	alignas(64) atomic<uint32_t> write_ticket = 0;
+	alignas(64) atomic<uint32_t> read_ticket = 0;
 	struct {
 		alignas(64)
-		std::atomic<uint8_t> write_turn = 0;
-		std::atomic<uint8_t> read_turn = 0;
+		atomic<uint8_t> write_turn = 0;
+		atomic<uint8_t> read_turn = 0;
 		int item = 0;
 	} slots[CAPACITY];
 };
@@ -28,70 +30,70 @@ struct Queue {
 // Blocking API
 
 void enqueue(Queue *queue, int item) {
-	uint32_t ticket = queue->write_ticket.fetch_add(1, std::memory_order::relaxed); // Serialization with all writers.
+	uint32_t ticket = queue->write_ticket.fetch_add(1, relaxed); // Serialization with all writers.
 	uint32_t slot = ticket % CAPACITY;
 	uint8_t turn = (uint8_t)(ticket / CAPACITY); // Write turns start at 0.
 
 	uint8_t current_turn;
-	while ((current_turn = queue->slots[slot].write_turn.load(std::memory_order::acquire)) != turn) // Serialization with 1 reader.
-		queue->slots[slot].write_turn.wait(current_turn, std::memory_order::acquire);
+	while ((current_turn = queue->slots[slot].write_turn.load(acquire)) != turn) // Serialization with 1 reader.
+		queue->slots[slot].write_turn.wait(current_turn, acquire); // Block while queue is full.
 
 	queue->slots[slot].item = item;
-	queue->slots[slot].read_turn.store(turn + 1, std::memory_order::release); // Serialization with 1 reader.
+	queue->slots[slot].read_turn.store(turn + 1, release); // Serialization with 1 reader.
 	queue->slots[slot].read_turn.notify_all(); // Hash table crawl.
 }
 int dequeue(Queue *queue) {
-	uint32_t ticket = queue->read_ticket.fetch_add(1, std::memory_order::relaxed); // Serialization with all readers.
+	uint32_t ticket = queue->read_ticket.fetch_add(1, relaxed); // Serialization with all readers.
 	uint32_t slot = ticket % CAPACITY;
-	uint8_t turn = (uint8_t)(ticket / CAPACITY + 1); // Write turns start at 1.
+	uint8_t turn = (uint8_t)(ticket / CAPACITY + 1); // Read turns start at 1.
 
 	uint8_t current_turn;
-	while ((current_turn = queue->slots[slot].read_turn.load(std::memory_order::acquire)) != turn) // Serialization with 1 writer.
-		queue->slots[slot].read_turn.wait(current_turn, std::memory_order::acquire);
+	while ((current_turn = queue->slots[slot].read_turn.load(acquire)) != turn) // Serialization with 1 writer.
+		queue->slots[slot].read_turn.wait(current_turn, acquire); // Block while queue is empty.
 
 	int item = queue->slots[slot].item;
-	queue->slots[slot].write_turn.store(turn, std::memory_order::release); // Serialization with 1 writer.
+	queue->slots[slot].write_turn.store(turn, release); // Serialization with 1 writer.
 	queue->slots[slot].write_turn.notify_all(); // Hash table crawl.
 	return item;
 }
 
-// Polling API (untested)
+// Polling API
 
 bool try_enqueue(Queue *queue, int item) {
-	uint32_t try_ticket = queue->write_ticket.load(std::memory_order::relaxed); // Serialization with all writers.
+	uint32_t try_ticket = queue->write_ticket.load(relaxed); // Serialization with all writers.
 	for (;;) {
 		uint32_t slot = try_ticket % CAPACITY;
 		uint8_t turn = (uint8_t)(try_ticket / CAPACITY); // Write turns start at 0.
-		uint8_t current_turn = queue->slots[slot].write_turn.load(std::memory_order::acquire); // Serialization with 1 reader.
+		uint8_t current_turn = queue->slots[slot].write_turn.load(acquire); // Serialization with 1 reader.
 
 		int turns_remaining = (int)(turn - current_turn);
 		if (turns_remaining > 0)
-			return false;
+			return false; // Queue is full.
 		else if (turns_remaining < 0)
-			try_ticket = queue->write_ticket.load(std::memory_order::relaxed);
-		else if (queue->write_ticket.compare_exchange_weak(try_ticket, try_ticket + 1, std::memory_order::relaxed)) {
+			try_ticket = queue->write_ticket.load(relaxed); // Another writer lapped us, try again.
+		else if (queue->write_ticket.compare_exchange_weak(try_ticket, try_ticket + 1, relaxed)) {
 			queue->slots[slot].item = item;
-			queue->slots[slot].read_turn.store(turn + 1, std::memory_order::release); // Serialization with 1 reader.
+			queue->slots[slot].read_turn.store(turn + 1, release); // Serialization with 1 reader.
 			queue->slots[slot].read_turn.notify_all(); // Hash table crawl.
 			return true;
 		}
 	}
 }
 bool try_dequeue(Queue *queue, int *out_item) {
-	uint32_t try_ticket = queue->read_ticket.load(std::memory_order::relaxed); // Serialization with all readers.
+	uint32_t try_ticket = queue->read_ticket.load(relaxed); // Serialization with all readers.
 	for (;;) {
 		uint32_t slot = try_ticket % CAPACITY;
 		uint8_t turn = (uint8_t)(try_ticket / CAPACITY + 1); // Read turns start at 1.
-		uint8_t current_turn = queue->slots[slot].read_turn.load(std::memory_order::acquire); // Serialization with 1 writer.
+		uint8_t current_turn = queue->slots[slot].read_turn.load(acquire); // Serialization with 1 writer.
 
 		int turns_remaining = (int)(turn - current_turn);
 		if (turns_remaining > 0)
-			return false;
+			return false; // Queue is empty.
 		else if (turns_remaining < 0)
-			try_ticket = queue->read_ticket.load(std::memory_order::relaxed);
-		else if (queue->read_ticket.compare_exchange_weak(try_ticket, try_ticket + 1, std::memory_order::relaxed)) {
+			try_ticket = queue->read_ticket.load(relaxed); // Another reader lapped us, try again.
+		else if (queue->read_ticket.compare_exchange_weak(try_ticket, try_ticket + 1, relaxed)) {
 			(*out_item) = queue->slots[slot].item;
-			queue->slots[slot].write_turn.store(turn, std::memory_order::release); // Serialization with 1 writer.
+			queue->slots[slot].write_turn.store(turn, release); // Serialization with 1 writer.
 			queue->slots[slot].write_turn.notify_all(); // Hash table crawl.
 			return true;
 		}
@@ -104,7 +106,7 @@ bool try_dequeue(Queue *queue, int *out_item) {
 #include <assert.h>
 
 void reader_thread(Queue *queue) {
-	static std::atomic<int> counters[3][1000000];
+	static atomic<int> counters[3][1000000];
 	int last_writer_data[3] = { -1, -1, -1 };
 	for (int i = 0; i < 1000000; ++i) {
 		int item;
@@ -114,14 +116,14 @@ void reader_thread(Queue *queue) {
 			while (!try_dequeue(queue, &item));
 		int writer_id = item / 1000000;
 		int data = item % 1000000;
-		assert(writer_id < 3); // Ensure no data corruption corruption.
+		assert(writer_id < 3); // Ensure no data corruption.
 		counters[writer_id][data].fetch_add(1);
 		assert(last_writer_data[writer_id] < data); // Ensure data is correctly sequenced FIFO.
 		last_writer_data[writer_id] = data;
 	}
 
 	// Wait for all readers to finish.
-	static std::atomic<int> done_counter;
+	static atomic<int> done_counter;
 	done_counter.fetch_add(1);
 	done_counter.notify_all();
 	int num_done;
@@ -133,7 +135,7 @@ void reader_thread(Queue *queue) {
 			assert(counters[writer_id][i] == 1); // Ensure all items have been properly received.
 }
 void writer_thread(Queue *queue) {
-	static std::atomic<int> id_dispenser;
+	static atomic<int> id_dispenser;
 	int id = id_dispenser.fetch_add(1);
 	for (int i = 0; i < 500000; ++i)
 		enqueue(queue, id * 1000000 + i);
@@ -142,12 +144,12 @@ void writer_thread(Queue *queue) {
 }
 int main() {
 	static Queue queue;
-	std::thread reader0(reader_thread, &queue);
-	std::thread reader1(reader_thread, &queue);
-	std::thread reader2(reader_thread, &queue);
-	std::thread writer0(writer_thread, &queue);
-	std::thread writer1(writer_thread, &queue);
-	std::thread writer2(writer_thread, &queue);
+	thread reader0(reader_thread, &queue);
+	thread reader1(reader_thread, &queue);
+	thread reader2(reader_thread, &queue);
+	thread writer0(writer_thread, &queue);
+	thread writer1(writer_thread, &queue);
+	thread writer2(writer_thread, &queue);
 	reader0.join();
 	reader1.join();
 	reader2.join();
