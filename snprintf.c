@@ -21,8 +21,8 @@
 #include <stdbool.h>
 
 static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
-	// This function is called from a lot of strange debugging contexts so
-	// it's important that it handles all possible input values correctly.
+	// This function can be called from a lot of strange debugging contexts
+	// so it's important that it handles all possible input values correctly.
 	// This includes crazy stuff like an INT_MAX width or precision field.
 	if (!dst || max <= 0) return 0;
 	if (!fmt) fmt = "(null)";
@@ -648,6 +648,7 @@ int main(void) {
 	bb_printf("%f %f", INFINITY, NAN);
 	bb_printf("%f_%+f_% f", 1.0, 2.0, 3.0);
 	bb_printf("%.17f", DBL_MAX);
+	bb_printf("%f", -0.0);
 	bb_printf("%f", 12345600000.00000000000000);
 	bb_printf("%f", 01234560000.00000000000000);
 	bb_printf("%f", 00123456000.00000000000000);
