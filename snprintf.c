@@ -28,8 +28,8 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 	if (!fmt) fmt = "(null)";
 
 	int write = 0;
-	int maxWrite = max - 1;
-	while (write < maxWrite && *fmt) {
+	int max_write = max - 1;
+	while (write < max_write && *fmt) {
 		if (*fmt != '%')
 			dst[write++] = *fmt++;
 		else {
@@ -60,15 +60,15 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 					width = 0;
 			}
 			else if (*fmt >= '1' && *fmt <= '9') {
-				unsigned uwidth = 0;
+				unsigned u = 0;
 				do {
-					unsigned prev = uwidth;
-					uwidth *= 10;
-					uwidth += *fmt++ - '0';
-					if (prev && uwidth <= prev) uwidth = UINT_MAX;
+					unsigned prev = u;
+					u *= 10;
+					u += *fmt++ - '0';
+					if (prev && u <= prev) u = UINT_MAX;
 				} while (*fmt >= '0' && *fmt <= '9');
-				if (uwidth > INT_MAX) uwidth = INT_MAX;
-				width = (int)uwidth;
+				if (u > INT_MAX) u = INT_MAX;
+				width = (int)u;
 			}
 			
 			// Parse precision.
@@ -81,15 +81,15 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 					precision = va_arg(args, int);
 				}
 				else if (*fmt >= '0' && *fmt <= '9') {
-					unsigned uprecision = 0;
+					unsigned u = 0;
 					do {
-						unsigned prev = uprecision;
-						uprecision *= 10;
-						uprecision += *fmt++ - '0';
-						if (prev && uprecision <= prev) uprecision = UINT_MAX;
+						unsigned prev = u;
+						u *= 10;
+						u += *fmt++ - '0';
+						if (prev && u <= prev) u = UINT_MAX;
 					} while (*fmt >= '0' && *fmt <= '9');
-					if (uprecision > INT_MAX) uprecision = INT_MAX;
-					precision = (int)uprecision;
+					if (u > INT_MAX) u = INT_MAX;
+					precision = (int)u;
 				}
 			}
 			
@@ -143,17 +143,17 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						if (c <= 0x7F) {
 							dst[write++] = (char)c;
 						} else if (c <= 0x7FF) {
-							if (write < maxWrite) dst[write++] = (char)(0xC0 | (c >> 6));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | (c & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0xC0 | (c >> 6));
+							if (write < max_write) dst[write++] = (char)(0x80 | (c & 0x3F));
 						} else if (c <= 0xFFFF) {
-							if (write < maxWrite) dst[write++] = (char)(0xE0 | (c >> 12));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | ((c >> 6) & 0x3F));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | (c & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0xE0 | (c >> 12));
+							if (write < max_write) dst[write++] = (char)(0x80 | ((c >> 6) & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0x80 | (c & 0x3F));
 						} else if (c <= 0x10FFFF) {
-							if (write < maxWrite) dst[write++] = (char)(0xF0 | (c >> 18));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | ((c >> 12) & 0x3F));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | ((c >> 6) & 0x3F));
-							if (write < maxWrite) dst[write++] = (char)(0x80 | (c & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0xF0 | (c >> 18));
+							if (write < max_write) dst[write++] = (char)(0x80 | ((c >> 12) & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0x80 | ((c >> 6) & 0x3F));
+							if (write < max_write) dst[write++] = (char)(0x80 | (c & 0x3F));
 						}
 					}
 					else dst[write++] = (char)c;
@@ -165,7 +165,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						s = "(null)";
 					if (precision < 0)
 						precision = INT_MAX;
-					int limit = maxWrite - write;
+					int limit = max_write - write;
 					if (limit > precision)
 						limit = precision;
 					for (int i = 0; i < limit && s[i]; i++)
@@ -245,8 +245,8 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						if (specifier == 'o' || specifier == 'x' || specifier == 'X' || specifier == 'p') {
 							base = specifier == 'o' ? 8 : 16;
 							if (specifier == 'p' || hash) {
-								if (write < maxWrite) dst[write++] = '0';
-								if (write < maxWrite && specifier != 'o') dst[write++] = specifier == 'X' ? 'X' : 'x';
+								if (write < max_write) dst[write++] = '0';
+								if (write < max_write && specifier != 'o') dst[write++] = specifier == 'X' ? 'X' : 'x';
 							}
 						}
 						else base = 10;
@@ -260,19 +260,19 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						
 						// Write out number in reverse.
 						char reverse[22];
-						int reverseLength = 0;
+						int reverse_length = 0;
 						do {
-							reverse[reverseLength++] = digits[u % base];
+							reverse[reverse_length++] = digits[u % base];
 							u /= base;
 						} while (u != 0);
 						
 						// Pad with leading 0s to fill up precision.
-						int numLeadingZeros = precision - reverseLength;
-						for (int i = 0; i < numLeadingZeros && write < maxWrite; i++)
+						int num_leading_zeros = precision - reverse_length;
+						for (int i = 0; i < num_leading_zeros && write < max_write; i++)
 							dst[write++] = '0';
 						
 						// Append the number in correct order.
-						for (int i = reverseLength - 1; i >= 0 && write < maxWrite; i--)
+						for (int i = reverse_length - 1; i >= 0 && write < max_write; i--)
 							dst[write++] = reverse[i];
 					}
 				} break;
@@ -300,13 +300,13 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 					if (fu.u > 0x7FF0000000000000)
 					{
 						if (specifier == 'f' || specifier == 'e' || specifier == 'g' || specifier == 'a') {
-							if (write < maxWrite) dst[write++] = 'n';
-							if (write < maxWrite) dst[write++] = 'a';
-							if (write < maxWrite) dst[write++] = 'n';
+							if (write < max_write) dst[write++] = 'n';
+							if (write < max_write) dst[write++] = 'a';
+							if (write < max_write) dst[write++] = 'n';
 						} else {
-							if (write < maxWrite) dst[write++] = 'N';
-							if (write < maxWrite) dst[write++] = 'A';
-							if (write < maxWrite) dst[write++] = 'N';
+							if (write < max_write) dst[write++] = 'N';
+							if (write < max_write) dst[write++] = 'A';
+							if (write < max_write) dst[write++] = 'N';
 						}
 						break;
 					}
@@ -319,13 +319,13 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 					// Test for infinity. Test the bit pattern explicitly to prevent compiler meddling.
 					if (fu.u == 0x7FF0000000000000) {
 						if (specifier == 'f' || specifier == 'e' || specifier == 'g' || specifier == 'a') {
-							if (write < maxWrite) dst[write++] = 'i';
-							if (write < maxWrite) dst[write++] = 'n';
-							if (write < maxWrite) dst[write++] = 'f';
+							if (write < max_write) dst[write++] = 'i';
+							if (write < max_write) dst[write++] = 'n';
+							if (write < max_write) dst[write++] = 'f';
 						} else {
-							if (write < maxWrite) dst[write++] = 'I';
-							if (write < maxWrite) dst[write++] = 'N';
-							if (write < maxWrite) dst[write++] = 'F';
+							if (write < max_write) dst[write++] = 'I';
+							if (write < max_write) dst[write++] = 'N';
+							if (write < max_write) dst[write++] = 'F';
 						}
 						break;
 					}
@@ -334,6 +334,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 					if (specifier == 'f' || specifier == 'F' || specifier == 'e' || specifier == 'E' || specifier == 'g' || specifier == 'G') {
 						//@non-standard: Decimal float output is not correctly rounded.
 						//               But it should be precise enough for most uses.
+						//               Output should be correct to ~16 decimal places.
 
 						// Default precision for all decimal float formats.
 						if (precision < 0)
@@ -345,9 +346,9 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						int exp10 = 0;
 						static const double BINARY_POWERS_OF_10[9] = { 1e256, 1e128, 1e64, 1e32, 1e16, 1e8, 1e4, 1e2, 1e1 };
 						for (int i = 0, increment = 256; i < 9; i++, increment >>= 1) {
-							double binaryPowerOf10 = BINARY_POWERS_OF_10[i];
-							if (f >= binaryPowerOf10) {
-								f /= binaryPowerOf10;
+							double pow10 = BINARY_POWERS_OF_10[i];
+							if (f >= pow10) {
+								f /= pow10;
 								exp10 += increment;
 							}
 						}
@@ -374,22 +375,21 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						}
 						
 						// Decide how many significant digits to extract.
-						int leftShiftCount = precision;
+						int left_shift_count = precision;
 						if (!scientific) {
 							if (exp10 > 0) {
-								int overflowProtection = INT_MAX - exp10;
-								if (leftShiftCount > overflowProtection)
-									leftShiftCount = overflowProtection;
-
-								}
-							leftShiftCount += exp10;
+								int overflow_protection = INT_MAX - exp10;
+								if (left_shift_count > overflow_protection)
+									left_shift_count = overflow_protection;
+							}
+							left_shift_count += exp10;
 						}
-						if (leftShiftCount > 18)
-							leftShiftCount = 18;
+						if (left_shift_count > 18)
+							left_shift_count = 18;
 						
 						// Extract significant digits.
 						unsigned long long shift = 1;
-						for (int i = 0; i < leftShiftCount; i++)
+						for (int i = 0; i < left_shift_count; i++)
 							shift *= 10;
 						f *= (double)shift;
 						unsigned long long u = (unsigned long long)f;
@@ -406,88 +406,88 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						
 						// Extract significant digits.
 						// Remember that leftShiftCount can be almost arbitrarily negative.
-						int numSignificantDigits = 1 + leftShiftCount;
-						if (numSignificantDigits < 0)
-							numSignificantDigits = 0;
+						int num_significant_digits = 1 + left_shift_count;
+						if (num_significant_digits < 0)
+							num_significant_digits = 0;
 						char digits[19];
-						for (int i = numSignificantDigits - 1; i >= 0; i--) {
+						for (int i = num_significant_digits - 1; i >= 0; i--) {
 							digits[i] = '0' + u % 10;
 							u /= 10;
 						}
-						int digitCursor = 0;
+						int digit_cursor = 0;
 						
 						// Decide how many integer digits go before the decimal point.
-						int numIntegerDigits = 1;
+						int num_integer_digits = 1;
 						if (!scientific)
-							numIntegerDigits += exp10;
+							num_integer_digits += exp10;
 						
 						// Write integer part.
-						if (numIntegerDigits > 0) {
-							int numLeadingDigits = numIntegerDigits;
-							if (numLeadingDigits > numSignificantDigits)
-								numLeadingDigits = numSignificantDigits;
-							for (int i = 0; i < numLeadingDigits && write < maxWrite; i++)
-								dst[write++] = digits[digitCursor++];
+						if (num_integer_digits > 0) {
+							int num_leading_digits = num_integer_digits;
+							if (num_leading_digits > num_significant_digits)
+								num_leading_digits = num_significant_digits;
+							for (int i = 0; i < num_leading_digits && write < max_write; i++)
+								dst[write++] = digits[digit_cursor++];
 							
-							int numTrailingZeros = numIntegerDigits - numLeadingDigits;
-							for (int i = 0; i < numTrailingZeros && write < maxWrite; i++)
+							int num_trailing_zeros = num_integer_digits - num_leading_digits;
+							for (int i = 0; i < num_trailing_zeros && write < max_write; i++)
 								dst[write++] = '0';
 						}
-						else if (write < maxWrite)
+						else if (write < max_write)
 							dst[write++] = '0';
 						
 						// Write fractional part.
-						bool haveDot = write < maxWrite && (precision > 0 || hash);
-						if (haveDot) {
+						bool have_dot = write < max_write && (precision > 0 || hash);
+						if (have_dot) {
 							dst[write++] = '.';
 				
 							// Decide how many leading zeros to prepend.
-							int numLeadingZeros = 0;
+							int num_leading_zeros = 0;
 							if (!scientific) {
 								// 1.23e-4 = 0.000123 = 3 leading zeros.
-								numLeadingZeros = -exp10 - 1;
-								if (numLeadingZeros < 0)
-									numLeadingZeros = 0;
-								if (numLeadingZeros > precision)
-									numLeadingZeros = precision;
+								num_leading_zeros = -exp10 - 1;
+								if (num_leading_zeros < 0)
+									num_leading_zeros = 0;
+								if (num_leading_zeros > precision)
+									num_leading_zeros = precision;
 							}
 							
 							// Append leading zeros.
-							for (int i = 0; i < numLeadingZeros && write < maxWrite; i++)
+							for (int i = 0; i < num_leading_zeros && write < max_write; i++)
 								dst[write++] = '0';
 							
 							// Append significant digits.
-							int numDigits = numSignificantDigits - digitCursor;
-							for (int i = 0; i < numDigits && write < maxWrite; i++)
-								dst[write++] = digits[digitCursor++];
+							int num_digits = num_significant_digits - digit_cursor;
+							for (int i = 0; i < num_digits && write < max_write; i++)
+								dst[write++] = digits[digit_cursor++];
 							
 							// Append trailing zeros.
-							int numTrailingZeros = precision - numDigits - numLeadingZeros;
-							for (int i = 0; i < numTrailingZeros && write < maxWrite; i++)
+							int num_trailing_zeros = precision - num_digits - num_leading_zeros;
+							for (int i = 0; i < num_trailing_zeros && write < max_write; i++)
 								dst[write++] = '0';
 						}
 						
 						// Write the exponent.
 						if (scientific) {
 							// Write exponent in reverse.
-							bool negativeExp = exp10 < 0;
-							unsigned uexp = negativeExp ? -exp10 : +exp10;
+							bool negative_exp = exp10 < 0;
+							unsigned uexp = negative_exp ? -exp10 : +exp10;
 							char reverse[3];
-							int reverseLength = 0;
+							int reverse_length = 0;
 							do {
-								reverse[reverseLength++] = '0' + uexp % 10;
+								reverse[reverse_length++] = '0' + uexp % 10;
 								uexp /= 10;
 							} while (uexp > 0);
 							
 							// Write exponent in correct order.
-							if (write < maxWrite) dst[write++] = specifier == 'E' || specifier == 'G' ? 'E' : 'e';
-							if (write < maxWrite) dst[write++] = negativeExp ? '-' : '+';
-							for (int i = reverseLength - 1; i >= 0 && write < maxWrite; i--)
+							if (write < max_write) dst[write++] = specifier == 'E' || specifier == 'G' ? 'E' : 'e';
+							if (write < max_write) dst[write++] = negative_exp ? '-' : '+';
+							for (int i = reverse_length - 1; i >= 0 && write < max_write; i--)
 								dst[write++] = reverse[i];
 						}
 						
 						// Trim trailing zeros and dot.
-						if ((specifier == 'g' || specifier == 'G') && !hash && haveDot) {
+						if ((specifier == 'g' || specifier == 'G') && !hash && have_dot) {
 							while (dst[write - 1] == '0')
 								dst[--write] = '\0';
 							if (dst[write - 1] == '.')
@@ -506,22 +506,22 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						fraction >>= 52 - prec * 4;
 						
 						// Prepend 0x to all hex floats.
-						if (write < maxWrite) dst[write++] = '0';
-						if (write < maxWrite) dst[write++] = specifier == 'A' ? 'X' : 'x';
+						if (write < max_write) dst[write++] = '0';
+						if (write < max_write) dst[write++] = specifier == 'A' ? 'X' : 'x';
 						
 						// Denormals start with '0', normals with '1'.
-						if (write < maxWrite) dst[write++] = exponent == 0 ? '0' : '1';
+						if (write < max_write) dst[write++] = exponent == 0 ? '0' : '1';
 						
 						// Append fraction.
 						// Precision 0 means no '.' unless the '#' flag was specified.
 						if (prec > 0 || hash) {
 							if (write < max) dst[write++] = '.';
 							const char* digits = specifier == 'A' ? "0123456789ABCDEF" : "0123456789abcdef";
-							for (int shift = 4 * (prec - 1); shift >= 0 && write < maxWrite; shift -= 4)
+							for (int shift = 4 * (prec - 1); shift >= 0 && write < max_write; shift -= 4)
 								dst[write++] = digits[(fraction >> shift) & 0xF];
 							
 							// Pad with 0 up to precision.
-							for (int i = prec; i < precision && write < maxWrite; i++)
+							for (int i = prec; i < precision && write < max_write; i++)
 								dst[write++] = '0';
 						}
 						
@@ -532,14 +532,14 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						// Append exponent in reverse order.
 						unsigned int u = exp2 >= 0 ? exp2 : -exp2;
 						char reverse[10];
-						int reverseLength = 0;
+						int reverse_length = 0;
 						do {
-							reverse[reverseLength++] = '0' + u % 10;
+							reverse[reverse_length++] = '0' + u % 10;
 							u /= 10;
 						} while (u > 0);
 						
 						// Output exponent in correct order.
-						for (int i = reverseLength - 1; i >= 0 && write < maxWrite; i--)
+						for (int i = reverse_length - 1; i >= 0 && write < max_write; i--)
 							dst[write++] = reverse[i];
 					}
 				} break;
@@ -565,7 +565,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 			int written = write - start;
 			int pad = width - written;
 			if (minus) { // Left-justify (padding on the right).
-				for (int i = 0; i < pad && write < maxWrite; ++i)
+				for (int i = 0; i < pad && write < max_write; ++i)
 					dst[write++] = padding;
 			}
 			else if (pad > 0) { // Right-justify (padding on the left).
@@ -577,18 +577,18 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 				// x___ABC|DE
 				//
 				int shift = written;
-				if (shift > maxWrite - start - pad)
-					shift = maxWrite - start - pad;
+				if (shift > max_write - start - pad)
+					shift = max_write - start - pad;
 				for (int i = shift; i >= 0; --i)
 					dst[start + pad + i] = dst[start + i];
 
 				// Now put in padding.
-				for (int i = 0; i < pad && start + i < maxWrite; ++i)
+				for (int i = 0; i < pad && start + i < max_write; ++i)
 					dst[start + i] = padding;
 				
 				write += pad;
-				if (write > maxWrite)
-					write = maxWrite;
+				if (write > max_write)
+					write = max_write;
 			}
 		}
 	}
