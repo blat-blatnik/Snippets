@@ -797,6 +797,11 @@ int main(void) {
 	bb_printf("%.0g", 123.456);
 	bb_printf("%#.0g", 123.456);
 
+	// %a
+	bb_printf("%a", DBL_MAX); // 0x1.FFFFFFFFFFFFFp+1023
+	bb_printf("%a", DBL_MIN); // 0x1.0000000000000p-1022
+	bb_printf("%a", DBL_TRUE_MIN); // 0x0.0000000000001p-1023
+
 	// padding
 	bb_printf("%12s", "123456");
 	bb_printf("%012s", "123456");
