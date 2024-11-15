@@ -13,6 +13,7 @@
 //   bb_snprintf(buf, 3, "12345") writes 2 chars and returns 2.
 //
 // The floating point specifiers are correct to ~16 decimal digits.
+// The hex-float specifier is completely correct and can round-trip.
 
 #include <limits.h>
 #include <stdarg.h>
@@ -603,7 +604,7 @@ static int bb_snprintf(char dst[], int max, const char* fmt, ...) {
 	return length;
 }
 
-// Testing
+// === testing ===
 
 #include <math.h>
 #include <float.h>
