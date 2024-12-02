@@ -53,129 +53,124 @@ bool pointInsideTriangularPrism(vec3 p, vec3 a0, vec3 a1, vec3 a2, vec3 b0, vec3
 		// Check which side of plane point is in. If it's always on the same side, it's colliding.
 		vec3 p01 = p1 - p0;
 		vec3 p02 = p2 - p0;
-		vec3 pn = cross(p01,p02);
-		float sd = dot(pn,p - p0);
-		if (i == 0) sgn = sd;
-		if (sgn*sd <= 0) 
+		vec3 n = cross(p01,p02);
+		float d = dot(n,p - p0);
+		if (i == 0) sgn = d;
+		if (sgn*d <= 0) 
 			return false;
 	}
 	return true;
 }
-// Sweep sphere Sc,Sr with velocity Sv against plane Pn of triangle T0,T1,T2, ignoring edges.
-bool sweepSphereTrianglePlane(inout Sweep s, vec3 sc, float sr, vec3 sv, vec3 t0, vec3 t1, vec3 t2, vec3 pn) {
+// Sweep sphere C,r with velocity Sv against plane N of triangle T0,T1,T2, ignoring edges.
+bool sweepSphereTrianglePlane(inout Sweep sweep, vec3 c, float r, vec3 v, vec3 t0, vec3 t1, vec3 t2, vec3 n) {
 	// Real-Time Collision Detection 5.5.3: Intersecting Moving Sphere Against Plane (pages 219-223).
-	float time;
-	float dist = dot(pn,sc - t0);
-	float pen = sr - dist;
+	float t;
+	float d = dot(n,c - t0);
+	float pen = r - d;
 	if (pen > 0)
-		time = 0; // Sphere already starts coliding with triangle plane.
+		t = 0; // Sphere already starts coliding with triangle plane.
 	else {
 		// Sphere isn't immediately colliding with the plane. Check if it's moving away.
-		float denom = dot(pn,sv);
+		float denom = dot(n,v);
 		if (denom >= 0)
 			return false; // Sphere is moving away from plane.
 		
 		// Sphere will collide with plane at some point.
-		time = (sr - dist)/denom;
+		t = (r - d)/denom;
 		pen = 0;
 	}
 	
 	// If sphere misses entire triangle plane, then it definitely misses the triangle too.
-	if (time >= s.time)
+	if (t >= sweep.time)
 		return false;
 	
 	// Is the plane collision point inside the triangle?
 	// Real-Time Collision Detection: 5.4.2: Testing Point in Triangle (pg 203-206).
-	vec3 collision = sc + time*sv - sr*pn;
+	vec3 collision = c + t*v - r*n;
 	if (!pointInsideTriangle(collision,t0,t1,t2))
 		return false;
 		
 	// Plane collision point is inside the triangle. So the sphere collides with the triangle.
-	s.time = time;
-	s.depth = pen;
-	s.point = collision;
-	s.normal = pn;
+	sweep.time = t;
+	sweep.depth = pen;
+	sweep.point = collision;
+	sweep.normal = n;
 	return true;
 }
-// Sweep sphere Sc,Sr with velocity Sv against plane Pn of parallelogram P0,P1,P2 ignoring edges.
-bool sweepSphereParallelogramPlane(inout Sweep s, vec3 sc, float sr, vec3 sv, vec3 p0, vec3 p1, vec3 p2, vec3 pn) {
+// Sweep sphere C,r with velocity V against plane N of parallelogram P0,P1,P2 ignoring edges.
+bool sweepSphereParallelogramPlane(inout Sweep sweep, vec3 c, float r, vec3 v, vec3 p0, vec3 p1, vec3 p2, vec3 n) {
 	// Real-Time Collision Detection 5.5.3: Intersecting Moving Sphere Against Plane (pages 219-223).
-	float time;
-	float dist = dot(sc,pn - p0);
-	float depth = sr - dist;
-	if (depth > 0)
-		time = 0; // Sphere already starts coliding with the quad plane.
+	float t;
+	float d = dot(c,n - p0);
+	float pen = r - d;
+	if (pen > 0)
+		t = 0; // Sphere already starts coliding with the quad plane.
 	else {
 		// Sphere isn't immediately colliding with the plane. Check if it's moving away.
-		float denom = dot(pn,sv);
+		float denom = dot(n,v);
 		if (denom >= 0)
 			return false; // Sphere is moving away from plane.
 		
 		// Sphere will collide with plane at some point.
-		time = (sr - dist)/denom;
-		depth = 0;
+		t = (r - d)/denom;
+		pen = 0;
 	}
 	
 	// If sphere misses entire quad plane, then it definitely misses the quad too.
-	if (time >= s.time)
+	if (t >= sweep.time)
 		return false;
 	
 	// Is the plane collision point inside the quad?
 	// Real-Time Collision Detection: 5.4.2: Testing Point in Triangle (pages 203-206).
-	vec3 collision = sc + time*sv - sr*pn;
+	vec3 collision = c + t*v - r*n;
 	if (!pointInsideParallelogram(collision,p0,p1,p2))
 		return false;
 	
 	// Plane collision point is inside the quad. So the sphere collides with the quad.
-	s.time = time;
-	s.depth = depth;
-	s.point = collision;
-	s.normal = pn;
+	sweep.time = t;
+	sweep.depth = pen;
+	sweep.point = collision;
+	sweep.normal = n;
 	return true;
 }
-// Sweep point Pt with velocity Pv against sphere Sc,Sr.
-bool sweepPointSphere(inout Sweep s, vec3 pt, vec3 pv, vec3 sc, float sr, vec3 fallbackNormal) {
+// Sweep point P with velocity V against sphere S,r.
+bool sweepPointSphere(inout Sweep sweep, vec3 p, vec3 v, vec3 s, float r, vec3 fallbackNormal) {
 	// Real-Time Collision Detection 5.3.2: Intersecting Ray or Segment Against Sphere (pages 177-179).
 	
 	// Set up quadratic equation.
-	vec3 sp = pt - sc;
-	float b = dot(sp,pv);
-	float c = dot(sp,sp) - sr*sr;
+	vec3 d = p - s;
+	float b = dot(d,v);
+	float c = dot(d,d) - r*r;
 	if (c > 0 && b > 0)
 		return false; // Point starts outside (c > 0) and moves away from sphere (b > 0).
-	float a = dot(pv,pv);
+	float a = dot(v,v);
 	float discr = b*b - a*c;
 	if (discr < 0)
 		return false; // Point misses sphere.
 	
 	// Point hits sphere. Compute time of first impact.
 	float t = (-b - sqrt(discr))/a;
-	if (t >= s.time)
+	if (t >= sweep.time)
 		return false;
 	
 	// The sphere is the first thing the point hits so far.
 	t = max(t, 0);
-	vec3 collision = pt + t*pv;
-	vec3 vec = collision - sc;
+	vec3 collision = p + t*v;
+	vec3 vec = collision - s;
 	float len = length(vec);
-	float depth = sr - len;
-	s.time = t;
-	s.depth = t > 0 ? 0 : depth;
-	s.point = collision;
-	if (len >= EPSILON)
-		s.normal = vec/len;
-	else
-		s.normal = fallbackNormal;
+	sweep.time = t;
+	sweep.depth = t > 0 ? 0 : r - len;
+	sweep.point = collision;
+	sweep.normal = len >= EPSILON ? vec/len : fallbackNormal;
 	return true;
 }
-// Sweep point Pt with velocity Pv against cylinder C0,C1,Cr, ignoring the endcaps.
-bool sweepPointUncappedCylinder(inout Sweep s, vec3 pt, vec3 pv, vec3 c0, vec3 c1, float cr, vec3 fallbackNormal) {
+// Sweep point P with velocity V against cylinder C0,C1,r, ignoring the endcaps.
+bool sweepPointUncappedCylinder(inout Sweep sweep, vec3 p, vec3 v, vec3 c0, vec3 c1, float r, vec3 fallbackNormal) {
 	// Real-Time Collision Detection 5.3.7: Intersecting Ray or Segment Against Cylinder (pages 194-198).
 	
 	// Test if swept point is fully outside of either endcap.
 	vec3 n = c1 - c0;
-	vec3 d = pt - c0;
-	vec3 v = pv;
+	vec3 d = p - c0;
 	float dn = dot(d,n);
 	float vn = dot(v,n);
 	float nn = dot(n,n);
@@ -190,7 +185,7 @@ bool sweepPointUncappedCylinder(inout Sweep s, vec3 pt, vec3 pv, vec3 c0, vec3 c
 	float dv = dot(d,v);
 	float dd = dot(d,d);
 	float a = nn*vv - vn*vn;
-	float c = nn*(dd - cr*cr) - dn*dn;
+	float c = nn*(dd - r*r) - dn*dn;
 	if (a < EPSILON) {
 		// Sweep direction is parallel to cylinder.
 		if (c > 0)
@@ -210,11 +205,11 @@ bool sweepPointUncappedCylinder(inout Sweep s, vec3 pt, vec3 pv, vec3 c0, vec3 c
 	}
 	
 	// Check if the sweep missed, or if it hits but another collision happens sooner.
-	if (t < 0 || t >= s.time)
+	if (t < 0 || t >= sweep.time)
 		return false;
 	
 	// This is the first collision. Find the closest point on the center of the cylinder.
-	vec3 collision = pt + t*pv;
+	vec3 collision = p + t*v;
 	vec3 center;
 	if (nn < EPSILON)
 		center = c0; // The cylinder is actually a circle.
@@ -224,24 +219,21 @@ bool sweepPointUncappedCylinder(inout Sweep s, vec3 pt, vec3 pv, vec3 c0, vec3 c
 	// Update collision time, depth, and normal.
 	vec3 vec = collision - center;
 	float len = length(vec);
-	float depth = cr - len;
-	s.time = t;
-	s.depth = t > 0 ? 0 : depth;
-	s.point = collision;
-	if (len >= EPSILON)
-		s.normal = vec/len;
-	else
-		s.normal = fallbackNormal;
+	float depth = r - len;
+	sweep.time = t;
+	sweep.depth = t > 0 ? 0 : depth;
+	sweep.point = collision;
+	sweep.normal = len >= EPSILON ? vec/len : fallbackNormal;
 	return true;
 }
 
 // Sweep a capsule C0,C1,Cr with velocity Cv against the triangle T0,T1,T2.
 //   c0,c1      capsule line segment endpoints
-//   cr         capsule radius
-//   cv         capsule velocity
+//   r          capsule radius
+//   v          capsule velocity
 //   t0,t1,t2   3 triangle vertices
 //   returns    whether the capsule and triangle intersect
-bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float cr, vec3 cv, vec3 t0, vec3 t1, vec3 t2) {
+bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float r, vec3 v, vec3 t0, vec3 t1, vec3 t2) {
 	// Compute triangle plane equation.
 	vec3 t01 = t1 - t0;
 	vec3 t02 = t2 - t0;
@@ -259,23 +251,23 @@ bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float cr, vec3 cv, ve
 	// Test for initial collision with the extruded triangle prism.
 	if (pointInsideTriangularPrism(c0,a0,a1,a2,b0,b1,b2)) {
 		// Capsule starts off penetrating triangle. Push it out from the triangle plane.
-		float sd0 = dot(normal,c0 - t0);
-		float sd1 = dot(normal,c1 - t0);
-		float sd = abs(sd0) <= abs(sd1) ? sd0 : sd1;
-		vec3 pn = sd >= 0 ? normal : -normal;
+		float d0 = dot(normal,c0 - t0);
+		float d1 = dot(normal,c1 - t0);
+		float d = abs(d0) <= abs(d1) ? d0 : d1;
+		vec3 n = d >= 0 ? normal : -normal;
 		s.time = 0;
-		s.depth = abs(sd) + cr;
-		s.normal = pn;
-		s.point = c0 + sd0*normal;
+		s.depth = abs(d) + r;
+		s.normal = n;
+		s.point = c0 + d0*normal;
 		return true;
 	}
 	
 	// Decompose capsule triangle sweep into: 2 sphere-triangle + 3 sphere-parallelogram + 9 point-cylinder + 6 point-sphere sweeps.
 	bool hit = false;
-	vec3 triangles[2][3] = { { a0,a1,a2 }, { b0,b1,b2 } };
-	vec3 parallelograms[3][3] = { { a0,a1,b0 }, { a1,a2,b1 }, { a2,a0,b2 } };
-	vec3 cylinders[9][2] = { { a0,a1 }, { a1,a2 }, { a2,a0 }, { b0,b1 }, { b1,b2 }, { b2,b0 }, { a0,b0 }, { a1,b1 }, { a2,b2 } };
-	vec3 spheres[6] = { a0, a1, a2, b0, b1, b2 };
+	vec3 triangles[2][3] = {{a0,a1,a2}, {b0,b1,b2}};
+	vec3 parallelograms[3][3] = {{a0,a1,b0}, {a1,a2,b1}, {a2,a0,b2}};
+	vec3 cylinders[9][2] = {{a0,a1}, {a1,a2}, {a2,a0}, {b0,b1}, {b1,b2}, {b2,b0}, {a0,b0}, {a1,b1}, {a2,b2}};
+	vec3 spheres[6] = {a0, a1, a2, b0, b1, b2};
 	
 	// Do sphere-triangle sweeps.
 	vec3 triangleNormals[2];
@@ -285,13 +277,12 @@ bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float cr, vec3 cv, ve
 		vec3 p2 = triangles[i][2];
 		
 		// Compute triangle plane normal.
-		vec3 pn = normal;
-		if (dot(pn,c0 - p0) < 0) pn = -pn; // Orient towards sphere.
-		triangleNormals[i] = pn;
+		vec3 n = normal;
+		if (dot(n,c0 - p0) < 0) n = -n; // Orient towards sphere.
+		triangleNormals[i] = n;
 		
 		// Test for triangle-plane sphere intersection.
-		bool h = sweepSphereTrianglePlane(s,c0,cr,cv,p0,p1,p2,pn);
-		hit = hit || h;
+		hit = hit || sweepSphereTrianglePlane(s,c0,r,v,p0,p1,p2,n);
 	}
 	
 	// Do sphere-parallelogram sweeps.
@@ -308,13 +299,12 @@ bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float cr, vec3 cv, ve
 		float len = length(c);
 		if (len > EPSILON) {
 			// Compute quad plane equation.
-			vec3 pn = c/len;
-			if (dot(pn,c0 - p0) < 0) pn = -pn; // Orient towards sphere.
-			parallelogramNormals[i] = pn;
+			vec3 n = c/len;
+			if (dot(n,c0 - p0) < 0) n = -n; // Orient towards sphere.
+			parallelogramNormals[i] = n;
 			
 			// Do the sweep test.
-			bool h = sweepSphereParallelogramPlane(s,c0,cr,cv,p0,p1,p2,pn);
-			hit = hit || h;
+			hit = hit || sweepSphereParallelogramPlane(s,c0,r,v,p0,p1,p2,n);
 		}
 		else parallelogramNormals[i] = triangleNormals[0];
 	}
@@ -323,21 +313,19 @@ bool sweepCapsuleTriangle(inout Sweep s, vec3 c0, vec3 c1, float cr, vec3 cv, ve
 	for (int i = 0; i < cylinders.length(); i++) {
 		vec3 p0 = cylinders[i][0];
 		vec3 p1 = cylinders[i][1];
-		vec3 normal;
+		vec3 n;
 		if (i < 6)
-			normal = triangleNormals[i/3];
+			n = triangleNormals[i/3];
 		else
-			normal = parallelogramNormals[i - 6];
-		bool h = sweepPointUncappedCylinder(s, c0, cv, p0, p1, cr, normal);
-		hit = hit || h;
+			n = parallelogramNormals[i - 6];
+		hit = hit || sweepPointUncappedCylinder(s,c0,v,p0,p1,r,n);
 	}
 	
 	// Do point-sphere sweeps.
 	for (int i = 0; i < spheres.length(); i++) {
-		vec3 center = spheres[i];
-		vec3 normal = triangleNormals[i/3];
-		bool h = sweepPointSphere(s, c0, cv, center, cr, normal);
-		hit = hit || h;
+		vec3 c = spheres[i];
+		vec3 n = triangleNormals[i/3];
+		hit = hit || sweepPointSphere(s,c0,v,c,r,n);
 	}
 	
 	return hit;
