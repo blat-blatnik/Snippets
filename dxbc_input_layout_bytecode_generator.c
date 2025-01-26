@@ -377,13 +377,16 @@ int main(void)
 
 		for (long long permutation = 0; permutation < num_permutations; permutation += advance)
 		{
+			// you can use any sensible semantic name + index for the inputs
+			static const char* const SEMANTICS[] = { "XYZW", "XYZ", "XY", "X" };
+
 			long long state = permutation;
 			for (int i = 0; i < num_inputs; i++)
 			{
 				DXGI_FORMAT format = FORMATS[state % _countof(FORMATS)];
 				state /= _countof(FORMATS);
-				inputs[i].SemanticName = "X"; // can be any sensible semantic name + index
-				inputs[i].SemanticIndex = i;
+				inputs[i].SemanticName = SEMANTICS[i % _countof(SEMANTICS)];
+				inputs[i].SemanticIndex = i / _countof(SEMANTICS);
 				inputs[i].Format = format;
 			}
 
@@ -417,7 +420,9 @@ int main(void)
 					case DXGI_FORMAT_R32_SINT: type = "int"; break;
 					case DXGI_FORMAT_R32_UINT: type = "uint"; break;
 				}
-				cursor += sprintf(cursor, "%s v%d: X%d;", type, i, i);
+				const char* semantic = SEMANTICS[i % _countof(SEMANTICS)];
+				int semantic_index = i / _countof(SEMANTICS);
+				cursor += sprintf(cursor, "%s v%d: %s%d;", type, i, semantic, semantic_index);
 			}
 			cursor += sprintf(cursor, " }; void vertex_shader(Input input) {}");
 
