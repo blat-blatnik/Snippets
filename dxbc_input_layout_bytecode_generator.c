@@ -1,7 +1,7 @@
 // Generates DXBC bytecode for use with D3DDevice.CreateInputLayout. So that you don't need to keep an actual shader around.
 // 
 // CreateInputLayout does actually validate everything about the shader, not just the input layour part.
-// So this function generates byte-for-byte identical output as D3DCompile.
+// So this function generates output that's byte-for-byte identical with D3DCompile.
 //
 // The bytecode format and checksum algorithm was reverse engineered with the help of Wine source.
 
@@ -39,7 +39,7 @@ void md5_transform(unsigned scratch[4], const unsigned input[16])
 	MD5_FF(a, b, c, d, input[12], 7, 1804603682);
 	MD5_FF(d, a, b, c, input[13], 12, 4254626195);
 	MD5_FF(c, d, a, b, input[14], 17, 2792965006);
-	MD5_FF(b, c, d, a, input[15], 22, 1236535329u);
+	MD5_FF(b, c, d, a, input[15], 22, 1236535329);
 	MD5_GG(a, b, c, d, input[1], 5, 4129170786);
 	MD5_GG(d, a, b, c, input[6], 9, 3225465664);
 	MD5_GG(c, d, a, b, input[11], 14, 643717713);
@@ -313,45 +313,41 @@ int generate_bytecode_for_input_layout(unsigned char out[1024], const D3D11_INPU
 	memcpy(end_of_isgn_data, FOOTER, sizeof FOOTER);
 	
 	// calculate modified MD5 checksum
-	unsigned char* data = out + 20;
-	int size = header.file_size - 20;
 	unsigned md5[4] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476 };
+	union { unsigned u32[16]; unsigned char u8[64]; } input = { 0 };
 
 	// process whole chunks
-	unsigned size_truncated_to_whole_chunk = size & ~63;
-	for (unsigned i = 0; i < size_truncated_to_whole_chunk; i += 64)
+	unsigned char* data = out + 20;
+	int size = header.file_size - 20;
+	int size_truncated_to_whole_chunk = size & ~63;
+	for (int i = 0; i < size_truncated_to_whole_chunk; i += 64)
 	{
-		unsigned input[16];
-		memcpy(input, &data[i], sizeof input);
-		md5_transform(md5, input);
+		memcpy(input.u8, data + i, sizeof input);
+		md5_transform(md5, input.u32);
 	}
 
 	// process leftover chunks
 	unsigned char* last_chunk_data = data + size_truncated_to_whole_chunk;
-	unsigned last_chunk_size = size - size_truncated_to_whole_chunk;
-	unsigned number_of_bits = size * 8;
-	unsigned quarter_bits = (number_of_bits >> 2) | 1;
-	static const unsigned char PADDING[64] = { 0x80 };
+	int last_chunk_size = size - size_truncated_to_whole_chunk;
 	if (last_chunk_size >= 56)
 	{
-		unsigned padding_size = 64 - last_chunk_size;
-		unsigned input[16] = { 0 };
-		memcpy((char*)input, last_chunk_data, last_chunk_size);
-		memcpy((char*)input + last_chunk_size, PADDING, padding_size);
-		md5_transform(md5, input);
+		memset(input.u8, 0, sizeof input);
+		memcpy(input.u8, last_chunk_data, last_chunk_size);
+		input.u8[last_chunk_size] = 0x80;
+		md5_transform(md5, input.u32);
 	}
-	unsigned input[16] = { [0] = number_of_bits, [15] = quarter_bits };
+	memset(input.u8, 0, sizeof input);
+	input.u32[0] = (size * 8);
+	input.u32[15] = (size * 2) | 1;
 	if (last_chunk_size < 56)
 	{
-		unsigned padding_size = 56 - last_chunk_size;
-		memcpy((char*)input + 4, last_chunk_data, last_chunk_size);
-		memcpy((char*)input + 4 + last_chunk_size, PADDING, padding_size);
+		memcpy(input.u8 + 4, last_chunk_data, last_chunk_size);
+		input.u8[4 + last_chunk_size] = 0x80;
 	}
-	md5_transform(md5, input);
+	md5_transform(md5, input.u32);
 
 	// copy checksum to header
 	memcpy(out + 4, md5, 16);
-
 	return header.file_size;
 }
 
@@ -459,11 +455,11 @@ int main(void)
 			#if 0
 			{
 				FILE* f;
-				f = fopen("bytecode.dxbc", "wb");
-				fwrite(bytecode, bytecode_length, 1, f);
+				f = fopen("ours.dxbc", "wb");
+				fwrite(our_bytecode, size_of_our_bytecode, 1, f);
 				fclose(f);
-				f = fopen("compare.dxbc", "wb");
-				fwrite(compare, compare_length, 1, f);
+				f = fopen("d3ds.dxbc", "wb");
+				fwrite(d3d_bytecode, size_of_d3d_bytecode, 1, f);
 				fclose(f);
 			}
 			#endif
