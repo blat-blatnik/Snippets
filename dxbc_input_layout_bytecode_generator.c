@@ -8,102 +8,7 @@
 #include <d3d11.h> // only for D3D11_INPUT_ELEMENT_DESC
 #include <string.h> // memcpy, memset, strcmp, strlen
 
-void md5_transform(unsigned scratch[4], const unsigned input[16])
-{
-	unsigned a = scratch[0];
-	unsigned b = scratch[1];
-	unsigned c = scratch[2];
-	unsigned d = scratch[3];
-
-	#define ROTATE_LEFT(x, n) ((x << n) | (x >> (32 - n)))
-	#define MD5_F(x, y, z) ((x & y) | (~x & z))
-	#define MD5_G(x, y, z) ((x & z) | (y & ~z))
-	#define MD5_H(x, y, z) (x ^ y ^ z)
-	#define MD5_I(x, y, z) (y ^ (x | ~z))
-	#define MD5_FF(a, b, c, d, x, s, ac) a += MD5_F(b, c, d) + x + ac; a = ROTATE_LEFT(a, s) + b;
-	#define MD5_GG(a, b, c, d, x, s, ac) a += MD5_G(b, c, d) + x + ac; a = ROTATE_LEFT(a, s) + b;
-	#define MD5_HH(a, b, c, d, x, s, ac) a += MD5_H(b, c, d) + x + ac; a = ROTATE_LEFT(a, s) + b;
-	#define MD5_II(a, b, c, d, x, s, ac) a += MD5_I(b, c, d) + x + ac; a = ROTATE_LEFT(a, s) + b;
-	MD5_FF(a, b, c, d, input[0], 7, 3614090360);
-	MD5_FF(d, a, b, c, input[1], 12, 3905402710);
-	MD5_FF(c, d, a, b, input[2], 17, 606105819);
-	MD5_FF(b, c, d, a, input[3], 22, 3250441966);
-	MD5_FF(a, b, c, d, input[4], 7, 4118548399);
-	MD5_FF(d, a, b, c, input[5], 12, 1200080426);
-	MD5_FF(c, d, a, b, input[6], 17, 2821735955);
-	MD5_FF(b, c, d, a, input[7], 22, 4249261313);
-	MD5_FF(a, b, c, d, input[8], 7, 1770035416);
-	MD5_FF(d, a, b, c, input[9], 12, 2336552879);
-	MD5_FF(c, d, a, b, input[10], 17, 4294925233);
-	MD5_FF(b, c, d, a, input[11], 22, 2304563134);
-	MD5_FF(a, b, c, d, input[12], 7, 1804603682);
-	MD5_FF(d, a, b, c, input[13], 12, 4254626195);
-	MD5_FF(c, d, a, b, input[14], 17, 2792965006);
-	MD5_FF(b, c, d, a, input[15], 22, 1236535329);
-	MD5_GG(a, b, c, d, input[1], 5, 4129170786);
-	MD5_GG(d, a, b, c, input[6], 9, 3225465664);
-	MD5_GG(c, d, a, b, input[11], 14, 643717713);
-	MD5_GG(b, c, d, a, input[0], 20, 3921069994);
-	MD5_GG(a, b, c, d, input[5], 5, 3593408605);
-	MD5_GG(d, a, b, c, input[10], 9, 38016083);
-	MD5_GG(c, d, a, b, input[15], 14, 3634488961);
-	MD5_GG(b, c, d, a, input[4], 20, 3889429448);
-	MD5_GG(a, b, c, d, input[9], 5, 568446438);
-	MD5_GG(d, a, b, c, input[14], 9, 3275163606);
-	MD5_GG(c, d, a, b, input[3], 14, 4107603335);
-	MD5_GG(b, c, d, a, input[8], 20, 1163531501);
-	MD5_GG(a, b, c, d, input[13], 5, 2850285829);
-	MD5_GG(d, a, b, c, input[2], 9, 4243563512);
-	MD5_GG(c, d, a, b, input[7], 14, 1735328473);
-	MD5_GG(b, c, d, a, input[12], 20, 2368359562);
-	MD5_HH(a, b, c, d, input[5], 4, 4294588738);
-	MD5_HH(d, a, b, c, input[8], 11, 2272392833);
-	MD5_HH(c, d, a, b, input[11], 16, 1839030562);
-	MD5_HH(b, c, d, a, input[14], 23, 4259657740);
-	MD5_HH(a, b, c, d, input[1], 4, 2763975236);
-	MD5_HH(d, a, b, c, input[4], 11, 1272893353);
-	MD5_HH(c, d, a, b, input[7], 16, 4139469664);
-	MD5_HH(b, c, d, a, input[10], 23, 3200236656);
-	MD5_HH(a, b, c, d, input[13], 4, 681279174);
-	MD5_HH(d, a, b, c, input[0], 11, 3936430074);
-	MD5_HH(c, d, a, b, input[3], 16, 3572445317);
-	MD5_HH(b, c, d, a, input[6], 23, 76029189);
-	MD5_HH(a, b, c, d, input[9], 4, 3654602809);
-	MD5_HH(d, a, b, c, input[12], 11, 3873151461);
-	MD5_HH(c, d, a, b, input[15], 16, 530742520);
-	MD5_HH(b, c, d, a, input[2], 23, 3299628645);
-	MD5_II(a, b, c, d, input[0], 6, 4096336452);
-	MD5_II(d, a, b, c, input[7], 10, 1126891415);
-	MD5_II(c, d, a, b, input[14], 15, 2878612391);
-	MD5_II(b, c, d, a, input[5], 21, 4237533241);
-	MD5_II(a, b, c, d, input[12], 6, 1700485571);
-	MD5_II(d, a, b, c, input[3], 10, 2399980690);
-	MD5_II(c, d, a, b, input[10], 15, 4293915773);
-	MD5_II(b, c, d, a, input[1], 21, 2240044497);
-	MD5_II(a, b, c, d, input[8], 6, 1873313359);
-	MD5_II(d, a, b, c, input[15], 10, 4264355552);
-	MD5_II(c, d, a, b, input[6], 15, 2734768916);
-	MD5_II(b, c, d, a, input[13], 21, 1309151649);
-	MD5_II(a, b, c, d, input[4], 6, 4149444226);
-	MD5_II(d, a, b, c, input[11], 10, 3174756917);
-	MD5_II(c, d, a, b, input[2], 15, 718787259);
-	MD5_II(b, c, d, a, input[9], 21, 3951481745);
-	#undef ROTATE_LEFT
-	#undef MD5_F
-	#undef MD5_G
-	#undef MD5_H
-	#undef MD5_I
-	#undef MD5_FF
-	#undef MD5_GG
-	#undef MD5_HH
-	#undef MD5_II
-
-	scratch[0] += a;
-	scratch[1] += b;
-	scratch[2] += c;
-	scratch[3] += d;
-}
-int generate_bytecode_for_input_layout(unsigned char out[1024], const D3D11_INPUT_ELEMENT_DESC inputs[], int num_inputs)
+int generate_bytecode_for_input_layout(unsigned char output[1024], const D3D11_INPUT_ELEMENT_DESC inputs[], int num_inputs)
 {
 	struct
 	{
@@ -205,7 +110,7 @@ int generate_bytecode_for_input_layout(unsigned char out[1024], const D3D11_INPU
 	} element;
 
 	// semantic name block goes after all the elements
-	char* start_of_elements = (char*)out + sizeof header;
+	char* start_of_elements = (char*)output + sizeof header;
 	char* start_of_isgn_data = start_of_elements - 8;
 	char* semantics0 = start_of_elements + num_inputs * sizeof element;
 	char* semantics1 = semantics0;
@@ -303,51 +208,120 @@ int generate_bytecode_for_input_layout(unsigned char out[1024], const D3D11_INPU
 	// fill out the rest of the header
 	char* end_of_isgn_data = semantics1;
 	header.file_size = sizeof header + (int)(end_of_isgn_data - start_of_elements) + sizeof FOOTER;
-	header.osgn_chunk_offset = (int)(end_of_isgn_data - (char*)out);
+	header.osgn_chunk_offset = (int)(end_of_isgn_data - (char*)output);
 	header.shdr_chunk_offset = header.osgn_chunk_offset + 16;
 	header.stat_chunk_offset = header.shdr_chunk_offset + 20;
 	header.isgn_chunk_size = (int)(end_of_isgn_data - start_of_isgn_data);
 
 	// sandwich between header and footer
-	memcpy(out, &header, sizeof header);
+	memcpy(output, &header, sizeof header);
 	memcpy(end_of_isgn_data, FOOTER, sizeof FOOTER);
 	
 	// calculate modified MD5 checksum
 	unsigned md5[4] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476 };
-	union { unsigned u32[16]; unsigned char u8[64]; } input = { 0 };
+	unsigned char* data = output + 20;
+	int data_size = header.file_size - 20;
+	for (int size = data_size; size >= -8; size -= 64, data += 64)
+	{
+		union { unsigned u32[16]; unsigned char u8[64]; } input = { 0 };
+		if (size >= 64)
+			memcpy(input.u8, data, 64);
+		else if (size >= 56)
+			input.u8[size] = 0x80;
+		else
+		{
+			input.u32[0] = (data_size * 8);
+			input.u32[15] = (data_size * 2) | 1;
+			if (size >= 0)
+				input.u8[4 + size] = 0x80;
+		}
 
-	// process whole chunks
-	unsigned char* data = out + 20;
-	int size = header.file_size - 20;
-	int size_truncated_to_whole_chunk = size & ~63;
-	for (int i = 0; i < size_truncated_to_whole_chunk; i += 64)
-	{
-		memcpy(input.u8, data + i, sizeof input);
-		md5_transform(md5, input.u32);
+		unsigned a = md5[0];
+		unsigned b = md5[1];
+		unsigned c = md5[2];
+		unsigned d = md5[3];
+		#define MD5_F1(x, y, z) ((x & y) | (~x & z))
+		#define MD5_F2(x, y, z) ((x & z) | (y & ~z))
+		#define MD5_F3(x, y, z) (x ^ y ^ z)
+		#define MD5_F4(x, y, z) (y ^ (x | ~z))
+		#define MD5_STEP(f, w, x, y, z, index, a, s) (w += f(x, y, z) + input.u32[index] + a, w = w << s | w >> (32 - s), w += x)
+		MD5_STEP(MD5_F1, a, b, c, d, 0, 0xd76aa478, 7);
+		MD5_STEP(MD5_F1, d, a, b, c, 1, 0xe8c7b756, 12);
+		MD5_STEP(MD5_F1, c, d, a, b, 2, 0x242070db, 17);
+		MD5_STEP(MD5_F1, b, c, d, a, 3, 0xc1bdceee, 22);
+		MD5_STEP(MD5_F1, a, b, c, d, 4, 0xf57c0faf, 7);
+		MD5_STEP(MD5_F1, d, a, b, c, 5, 0x4787c62a, 12);
+		MD5_STEP(MD5_F1, c, d, a, b, 6, 0xa8304613, 17);
+		MD5_STEP(MD5_F1, b, c, d, a, 7, 0xfd469501, 22);
+		MD5_STEP(MD5_F1, a, b, c, d, 8, 0x698098d8, 7);
+		MD5_STEP(MD5_F1, d, a, b, c, 9, 0x8b44f7af, 12);
+		MD5_STEP(MD5_F1, c, d, a, b, 10, 0xffff5bb1, 17);
+		MD5_STEP(MD5_F1, b, c, d, a, 11, 0x895cd7be, 22);
+		MD5_STEP(MD5_F1, a, b, c, d, 12, 0x6b901122, 7);
+		MD5_STEP(MD5_F1, d, a, b, c, 13, 0xfd987193, 12);
+		MD5_STEP(MD5_F1, c, d, a, b, 14, 0xa679438e, 17);
+		MD5_STEP(MD5_F1, b, c, d, a, 15, 0x49b40821, 22);
+		MD5_STEP(MD5_F2, a, b, c, d, 1, 0xf61e2562, 5);
+		MD5_STEP(MD5_F2, d, a, b, c, 6, 0xc040b340, 9);
+		MD5_STEP(MD5_F2, c, d, a, b, 11, 0x265e5a51, 14);
+		MD5_STEP(MD5_F2, b, c, d, a, 0, 0xe9b6c7aa, 20);
+		MD5_STEP(MD5_F2, a, b, c, d, 5, 0xd62f105d, 5);
+		MD5_STEP(MD5_F2, d, a, b, c, 10, 0x02441453, 9);
+		MD5_STEP(MD5_F2, c, d, a, b, 15, 0xd8a1e681, 14);
+		MD5_STEP(MD5_F2, b, c, d, a, 4, 0xe7d3fbc8, 20);
+		MD5_STEP(MD5_F2, a, b, c, d, 9, 0x21e1cde6, 5);
+		MD5_STEP(MD5_F2, d, a, b, c, 14, 0xc33707d6, 9);
+		MD5_STEP(MD5_F2, c, d, a, b, 3, 0xf4d50d87, 14);
+		MD5_STEP(MD5_F2, b, c, d, a, 8, 0x455a14ed, 20);
+		MD5_STEP(MD5_F2, a, b, c, d, 13, 0xa9e3e905, 5);
+		MD5_STEP(MD5_F2, d, a, b, c, 2, 0xfcefa3f8, 9);
+		MD5_STEP(MD5_F2, c, d, a, b, 7, 0x676f02d9, 14);
+		MD5_STEP(MD5_F2, b, c, d, a, 12, 0x8d2a4c8a, 20);
+		MD5_STEP(MD5_F3, a, b, c, d, 5, 0xfffa3942, 4);
+		MD5_STEP(MD5_F3, d, a, b, c, 8, 0x8771f681, 11);
+		MD5_STEP(MD5_F3, c, d, a, b, 11, 0x6d9d6122, 16);
+		MD5_STEP(MD5_F3, b, c, d, a, 14, 0xfde5380c, 23);
+		MD5_STEP(MD5_F3, a, b, c, d, 1, 0xa4beea44, 4);
+		MD5_STEP(MD5_F3, d, a, b, c, 4, 0x4bdecfa9, 11);
+		MD5_STEP(MD5_F3, c, d, a, b, 7, 0xf6bb4b60, 16);
+		MD5_STEP(MD5_F3, b, c, d, a, 10, 0xbebfbc70, 23);
+		MD5_STEP(MD5_F3, a, b, c, d, 13, 0x289b7ec6, 4);
+		MD5_STEP(MD5_F3, d, a, b, c, 0, 0xeaa127fa, 11);
+		MD5_STEP(MD5_F3, c, d, a, b, 3, 0xd4ef3085, 16);
+		MD5_STEP(MD5_F3, b, c, d, a, 6, 0x04881d05, 23);
+		MD5_STEP(MD5_F3, a, b, c, d, 9, 0xd9d4d039, 4);
+		MD5_STEP(MD5_F3, d, a, b, c, 12, 0xe6db99e5, 11);
+		MD5_STEP(MD5_F3, c, d, a, b, 15, 0x1fa27cf8, 16);
+		MD5_STEP(MD5_F3, b, c, d, a, 2, 0xc4ac5665, 23);
+		MD5_STEP(MD5_F4, a, b, c, d, 0, 0xf4292244, 6);
+		MD5_STEP(MD5_F4, d, a, b, c, 7, 0x432aff97, 10);
+		MD5_STEP(MD5_F4, c, d, a, b, 14, 0xab9423a7, 15);
+		MD5_STEP(MD5_F4, b, c, d, a, 5, 0xfc93a039, 21);
+		MD5_STEP(MD5_F4, a, b, c, d, 12, 0x655b59c3, 6);
+		MD5_STEP(MD5_F4, d, a, b, c, 3, 0x8f0ccc92, 10);
+		MD5_STEP(MD5_F4, c, d, a, b, 10, 0xffeff47d, 15);
+		MD5_STEP(MD5_F4, b, c, d, a, 1, 0x85845dd1, 21);
+		MD5_STEP(MD5_F4, a, b, c, d, 8, 0x6fa87e4f, 6);
+		MD5_STEP(MD5_F4, d, a, b, c, 15, 0xfe2ce6e0, 10);
+		MD5_STEP(MD5_F4, c, d, a, b, 6, 0xa3014314, 15);
+		MD5_STEP(MD5_F4, b, c, d, a, 13, 0x4e0811a1, 21);
+		MD5_STEP(MD5_F4, a, b, c, d, 4, 0xf7537e82, 6);
+		MD5_STEP(MD5_F4, d, a, b, c, 11, 0xbd3af235, 10);
+		MD5_STEP(MD5_F4, c, d, a, b, 2, 0x2ad7d2bb, 15);
+		MD5_STEP(MD5_F4, b, c, d, a, 9, 0xeb86d391, 21);
+		#undef MD5_F1
+		#undef MD5_F2
+		#undef MD5_F3
+		#undef MD5_F4
+		#undef MD5_STEP
+		md5[0] += a;
+		md5[1] += b;
+		md5[2] += c;
+		md5[3] += d;
 	}
-
-	// process leftover chunks
-	unsigned char* last_chunk_data = data + size_truncated_to_whole_chunk;
-	int last_chunk_size = size - size_truncated_to_whole_chunk;
-	if (last_chunk_size >= 56)
-	{
-		memset(input.u8, 0, sizeof input);
-		memcpy(input.u8, last_chunk_data, last_chunk_size);
-		input.u8[last_chunk_size] = 0x80;
-		md5_transform(md5, input.u32);
-	}
-	memset(input.u8, 0, sizeof input);
-	input.u32[0] = (size * 8);
-	input.u32[15] = (size * 2) | 1;
-	if (last_chunk_size < 56)
-	{
-		memcpy(input.u8 + 4, last_chunk_data, last_chunk_size);
-		input.u8[4 + last_chunk_size] = 0x80;
-	}
-	md5_transform(md5, input.u32);
 
 	// copy checksum to header
-	memcpy(out + 4, md5, 16);
+	memcpy(output + 4, md5, 16);
 	return header.file_size;
 }
 
@@ -363,6 +337,7 @@ int main(void)
 {
 	unsigned long long total_qpc_genbytecode = 0;
 	unsigned long long total_qpc_d3dcompile = 0;
+	double total_calls = 0;
 
 	static const DXGI_FORMAT FORMATS[] =
 	{
@@ -379,7 +354,7 @@ int main(void)
 		DXGI_FORMAT_R32_SINT,
 		DXGI_FORMAT_R32_UINT,
 	};
-	D3D11_INPUT_ELEMENT_DESC inputs[6] = { 0 }; // this is exponentially slow with higher max inputs
+	D3D11_INPUT_ELEMENT_DESC inputs[16] = { 0 }; // D3D supports max 16 input slots
 	for (int num_inputs = 0; num_inputs < _countof(inputs); num_inputs++)
 	{
 		LARGE_INTEGER qpf;
@@ -387,17 +362,22 @@ int main(void)
 
 		double total_seconds_genbytecode = total_qpc_genbytecode / (double)qpf.QuadPart;
 		double total_seconds_d3dcompile = total_qpc_d3dcompile / (double)qpf.QuadPart;
+		double seconds_per_genbytecode = total_seconds_genbytecode / total_calls;
+		double seconds_per_d3dcompile = total_seconds_d3dcompile / total_calls;
 		double ratio = total_seconds_d3dcompile / total_seconds_genbytecode;
-		printf("%d inputs... genbytecode: %.3f, d3dcompile: %.3f (%.1fx faster)\n", num_inputs,
-			total_seconds_genbytecode, total_seconds_d3dcompile, ratio);
+		printf("%d inputs, genbytecode: %.1f us, d3dcompile: %.1f us, %.1fx faster\n", num_inputs,
+			seconds_per_genbytecode * 1e6, seconds_per_d3dcompile * 1e6, ratio);
 
-		int num_permutations = 1; // pow(countof(FORMATS), num_inputs)
+		long long num_permutations = 1; // pow(countof(FORMATS), num_inputs)
 		for (int i = 0; i < num_inputs; i++)
 			num_permutations *= _countof(FORMATS);
 		
-		for (int permutation = 0; permutation < num_permutations; permutation++)
+		const int MAX_PERMUTATIONS = 1000; // upper bound on iterations per #inputs otherwise it grows exponentially
+		long long advance = (num_permutations + MAX_PERMUTATIONS - 1) / MAX_PERMUTATIONS;
+
+		for (long long permutation = 0; permutation < num_permutations; permutation += advance)
 		{
-			int state = permutation;
+			long long state = permutation;
 			for (int i = 0; i < num_inputs; i++)
 			{
 				DXGI_FORMAT format = FORMATS[state % _countof(FORMATS)];
@@ -468,6 +448,7 @@ int main(void)
 			assert(memcmp(our_bytecode, d3d_bytecode, size_of_d3d_bytecode) == 0);
 			
 			blob->lpVtbl->Release(blob);
+			total_calls += 1;
 		}
 	}
 }
