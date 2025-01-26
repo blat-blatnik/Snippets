@@ -227,7 +227,7 @@ int generate_bytecode_for_input_layout(unsigned char output[1024], const D3D11_I
 		if (size >= 64)
 			memcpy(input.u8, data, 64);
 		else if (size >= 56)
-			input.u8[size] = 0x80;
+			input.u8[size] = 0x80; // end of footer is all 0 so don't need to copy anything
 		else
 		{
 			input.u32[0] = (data_size * 8);
@@ -372,7 +372,7 @@ int main(void)
 		for (int i = 0; i < num_inputs; i++)
 			num_permutations *= _countof(FORMATS);
 		
-		const int MAX_PERMUTATIONS = 1000; // upper bound on iterations per #inputs otherwise it grows exponentially
+		const int MAX_PERMUTATIONS = 2000; // upper bound on iterations per #inputs otherwise it grows exponentially
 		long long advance = (num_permutations + MAX_PERMUTATIONS - 1) / MAX_PERMUTATIONS;
 
 		for (long long permutation = 0; permutation < num_permutations; permutation += advance)
