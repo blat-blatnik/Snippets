@@ -39,7 +39,7 @@ void normalize(char path[]) {
 	*dst = '\0';
 }
 
-// === TESTING ===
+// === TESTS ===
 
 #include <assert.h>
 #include <string.h>
