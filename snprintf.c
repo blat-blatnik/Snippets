@@ -375,7 +375,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 								scientific = true;
 						}
 						
-						// Decide how many significant digits to extract.
+						// Decide how many digits to shift to the left of the decimal point.
 						int left_shift_count = precision;
 						if (!scientific) {
 							if (exp10 > 0) {
@@ -388,7 +388,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						if (left_shift_count > 18)
 							left_shift_count = 18;
 						
-						// Extract significant digits.
+						// Shift significant digits to the left of the decimal point.
 						unsigned long long shift = 1;
 						for (int i = 0; i < left_shift_count; i++)
 							shift *= 10;
@@ -396,7 +396,7 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						unsigned long long u = (unsigned long long)f;
 						f -= (double)u;
 						
-						// Round to nearest.
+						// Round the significant digits to nearest.
 						if (f >= 0.5) {
 							u += 1;
 							if (u >= shift * 10) {
@@ -406,32 +406,28 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 						}
 						
 						// Extract significant digits.
-						// Remember that leftShiftCount can be almost arbitrarily negative.
 						int num_significant_digits = 1 + left_shift_count;
-						if (num_significant_digits < 0)
+						if (num_significant_digits < 0) // Remember that left_shift_count can be negative when exp10 is negative.
 							num_significant_digits = 0;
 						char digits[19];
 						for (int i = num_significant_digits - 1; i >= 0; i--) {
 							digits[i] = '0' + u % 10;
 							u /= 10;
 						}
-						int digit_cursor = 0;
 						
 						// Decide how many integer digits go before the decimal point.
 						int num_integer_digits = 1;
-						if (!scientific)
+						if (!scientific) {
 							num_integer_digits += exp10;
+							if (num_integer_digits < 0)
+								num_integer_digits = 0;
+						}
 						
 						// Write integer part.
 						if (num_integer_digits > 0) {
-							int num_leading_digits = num_integer_digits;
-							if (num_leading_digits > num_significant_digits)
-								num_leading_digits = num_significant_digits;
-							for (int i = 0; i < num_leading_digits && write < max_write; i++)
-								dst[write++] = digits[digit_cursor++];
-							
-							int num_trailing_zeros = num_integer_digits - num_leading_digits;
-							for (int i = 0; i < num_trailing_zeros && write < max_write; i++)
+							for (int i = 0; i < num_integer_digits && i < num_significant_digits && write < max_write; i++)
+								dst[write++] = digits[i];
+							for (int i = num_significant_digits; i < num_integer_digits && write < max_write; i++)
 								dst[write++] = '0';
 						}
 						else if (write < max_write)
@@ -451,20 +447,18 @@ static int bb_vsnprintf(char dst[], int max, const char* fmt, va_list args) {
 									num_leading_zeros = 0;
 								if (num_leading_zeros > precision)
 									num_leading_zeros = precision;
+
+								// Append leading zeros.
+								for (int i = 0; i < num_leading_zeros && write < max_write; i++)
+									dst[write++] = '0';
 							}
 							
-							// Append leading zeros.
-							for (int i = 0; i < num_leading_zeros && write < max_write; i++)
-								dst[write++] = '0';
-							
 							// Append significant digits.
-							int num_digits = num_significant_digits - digit_cursor;
-							for (int i = 0; i < num_digits && write < max_write; i++)
-								dst[write++] = digits[digit_cursor++];
+							for (int i = num_integer_digits; i < num_significant_digits && write < max_write; i++)
+								dst[write++] = digits[i];
 							
 							// Append trailing zeros.
-							int num_trailing_zeros = precision - num_digits - num_leading_zeros;
-							for (int i = 0; i < num_trailing_zeros && write < max_write; i++)
+							for (int i = num_leading_zeros + num_significant_digits - num_integer_digits; i < precision && write < max_write; i++)
 								dst[write++] = '0';
 						}
 						
@@ -632,7 +626,7 @@ int main(void) {
 	bb_printf("%?");
 
 	// integer
-	bb_printf("%lld %lld", LONG_MIN, LONG_MAX);
+	bb_printf("%ld %ld", LONG_MIN, LONG_MAX);
 	bb_printf("%.0d %.0d", 0, 1);
 	bb_printf("%.10d", 123);
 	bb_printf("%hhx %hx %x", SCHAR_MIN, SHRT_MIN, INT_MIN);
