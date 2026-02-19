@@ -8,9 +8,9 @@
 #endif
 
 #if !defined _MSC_VER || defined __cplusplus
-#define BNAN __builtin_nanf("")
+#define B_NAN __builtin_nanf("")
 #else
-#define BNAN (-(float)(1e300 * 1e300 * 0))
+#define B_NAN (-(float)(1e300 * 1e300 * 0))
 #endif
 
 static inline float b_abs(float x) {
@@ -179,7 +179,7 @@ static float b_log2(float x) {
 
 	// reconstruct full range
 	float log2 = e + log2f;
-	return e > 127 ? BNAN : log2; // log(negative) = NaN
+	return e > 127 ? B_NAN : log2; // log(negative) = NaN
 }
 
 // === functions derived from base functions ====
@@ -229,19 +229,16 @@ static inline float b_acosh(float x) {
 static inline float b_atanh(float yoverx) {
 	return b_log2((1 + yoverx) / (1 - yoverx)) / 18.129440567308773f; // 2*log2(e)*tau
 }
-static inline float b_exp(float x)
-{
+static inline float b_exp(float x) {
 	return b_exp2(x * 1.4426950408889634f); // log2(e)
 }
-static inline float b_log(float x)
-{
+static inline float b_log(float x) {
 	return b_log2(x) / 1.4426950408889634f; // log2(e)
 }
 static inline float b_log10(float x) {
 	return b_log2(x) / 3.3219280948873626f; // log2(10)
 }
-static inline float b_pow(float x, float y)
-{
+static inline float b_pow(float x, float y) {
 	return b_exp2(y * b_log2(x));
 }
 
@@ -269,6 +266,24 @@ int main() {
 		float c = b_log2(a);
 		float d = b_abs(c - (float)pow2);
 		assert(a == b);
+		assert(d < 1e-5f);
+	}
+
+	// pow(x,0.5) is close to sqrt
+	for (int i = 1; i <= +9999; i++) {
+		float f = (float)i;
+		float a = b_sqrt(f);
+		float b = b_pow(f, 0.5f);
+		float d = b_abs(a - b) / a;
+		assert(d < 1e-5f);
+	}
+
+	// pow(x,3) is close to x*x*x
+	for (int i = 1; i <= +9999; i++) {
+		float f = (float)i;
+		float a = f * f * f;
+		float b = b_pow(f, 3);
+		float d = b_abs(a - b) / a;
 		assert(d < 1e-5f);
 	}
 }
