@@ -1,5 +1,5 @@
 // Polynomial approximations to trigonometric and exponential functions.
-// Trigometric functions work in turns (1 turn = 2pi) instead of radians.
+// Trigometric functions work in turns instead of radians, 1 turn = 2pi.
 
 // === compiler intrinsics ===
 
