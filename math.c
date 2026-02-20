@@ -239,7 +239,7 @@ static inline float b_log10(float x) {
 	return b_log2(x) / 3.3219280948873626f; // log2(10)
 }
 static inline float b_pow(float x, float y) {
-	return b_exp2(y * b_log2(x));
+	return b_exp2(b_log2(x) * y);
 }
 
 // === tests ===
